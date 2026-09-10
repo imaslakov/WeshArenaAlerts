@@ -244,6 +244,9 @@ function Options:BuildGeneralPage()
         if WAA.EnemyOverpower then
             WAA.EnemyOverpower:OnSettingsChanged()
         end
+        if WAA.Scatter then
+            WAA.Scatter:OnSettingsChanged()
+        end
     end, -92)
 
     local heading = CreateLabel(page, "Positioning / Preview", "GameFontNormal")
@@ -303,10 +306,16 @@ function Options:BuildDrinkingPage()
 end
 
 function Options:BuildScatterPage()
-    local page = self:CreatePage("scatter", "Scatter", "A brief red fullscreen flash. The overlay never accepts mouse input.")
+    local page = self:CreatePage("scatter", "Scatter", "Instant red fullscreen reaction flash when a mapped enemy Hunter uses Scatter Shot.")
     local db = function() return WAA.db.modules.scatter end
-    self:CreateCheckbox(page, "Enabled", function() return db().enabled end, function(v) db().enabled = v end, -92)
-    self:CreateCheckbox(page, "Flash enabled", function() return db().flashEnabled end, function(v) db().flashEnabled = v end, -128)
+    self:CreateCheckbox(page, "Enabled", function() return db().enabled end, function(v)
+        db().enabled = v
+        WAA.Scatter:OnSettingsChanged()
+    end, -92)
+    self:CreateCheckbox(page, "Flash enabled", function() return db().flashEnabled end, function(v)
+        db().flashEnabled = v
+        WAA.Scatter:OnSettingsChanged()
+    end, -128)
     self:CreateSlider(page, "Flash opacity", 0.1, 1, 0.05, 2, function() return db().opacity end, function(v) db().opacity = v end, -184)
     self:CreateSlider(page, "Flash duration (seconds)", 0.1, 3, 0.1, 1, function() return db().duration end, function(v) db().duration = v end, -257)
     self:CreateTestArea(page, function() WAA.Alerts:ShowScatterPreview() end, -344)

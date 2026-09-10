@@ -66,6 +66,9 @@ function Arena:Deactivate()
     if WAA.Drinking then
         WAA.Drinking:ClearRuntime()
     end
+    if WAA.Scatter then
+        WAA.Scatter:ClearRuntime()
+    end
     self:ClearOpponentData()
     WAA.Alerts:ClearRuntime()
     WAA:Debug("Arena runtime deactivated")
@@ -91,6 +94,9 @@ function Arena:UpdateOpponent(unitToken, updateType)
         end
         if WAA.Drinking then
             WAA.Drinking:RemoveOpponent(old.guid, "opponent removed")
+        end
+        if WAA.Scatter then
+            WAA.Scatter:RemoveOpponent(old.guid)
         end
     end
 

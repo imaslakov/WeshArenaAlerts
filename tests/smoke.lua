@@ -49,10 +49,15 @@ end
 function Object:GetValue() return self.value or self.minimum or 0 end
 function Object:SetThumbTexture() self.thumb = NewObject() end
 function Object:GetThumbTexture() return self.thumb end
-function Object:Show() self.shown = true end
+function Object:Show()
+    self.shown = true
+    self.showCount = (rawget(self, "showCount") or 0) + 1
+end
 function Object:Hide() self.shown = false end
 function Object:SetShown(value) self.shown = value end
 function Object:IsShown() return self.shown end
+function Object:SetAlpha(value) self.alpha = value end
+function Object:EnableMouse(value) self.mouseEnabled = value end
 function Object:LockHighlight() self.highlighted = true end
 function Object:UnlockHighlight() self.highlighted = false end
 function Object:GetID() return self.id or 77 end
@@ -129,6 +134,7 @@ local files = {
     "Arena.lua",
     "EnemyOverpower.lua",
     "Drinking.lua",
+    "Scatter.lua",
     "Options.lua",
 }
 for _, file in ipairs(files) do
@@ -189,6 +195,24 @@ local function ResetDrinking()
     unitAuras = {}
 end
 
+local function ResetScatter()
+    namespace.db.general.enabled = true
+    namespace.db.modules.scatter.enabled = true
+    namespace.db.modules.scatter.flashEnabled = true
+    namespace.db.modules.scatter.opacity = 0.55
+    namespace.db.modules.scatter.duration = 0.45
+    namespace.Scatter:ClearRuntime()
+    namespace.Alerts:CancelHide("scatter")
+    namespace.Alerts.scatterDisplayMode = nil
+    namespace.Alerts.frames.scatter:Hide()
+    namespace.Alerts.frames.scatter.showCount = 0
+end
+
+local function AssertNoScatter(message)
+    assert(namespace.Alerts.frames.scatter.showCount == 0, message)
+    assert(not namespace.Alerts.frames.scatter:IsShown(), message .. " (frame visible)")
+end
+
 local function MissEvent(eventType, sourceGUID, destGUID, missType, spellID)
     return {
         eventType = eventType,
@@ -226,7 +250,7 @@ Fire("PLAYER_LOGIN")
 
 -- Milestone 0.1 compatibility smoke checks.
 assert(namespace.initialized)
-assert(namespace.version == "0.3.0")
+assert(namespace.version == "0.4.0")
 assert(namespace.Drinking.drinkAuraName == "Drink")
 assert(namespace.Drinking.KNOWN_DRINK_SPELL_IDS[430])
 assert(namespace.Drinking.KNOWN_DRINK_SPELL_IDS[43154])
@@ -235,6 +259,9 @@ assert(namespace.EnemyOverpower.OVERPOWER_SPELL_IDS[7384])
 assert(namespace.EnemyOverpower.OVERPOWER_SPELL_IDS[7887])
 assert(namespace.EnemyOverpower.OVERPOWER_SPELL_IDS[11584])
 assert(namespace.EnemyOverpower.OVERPOWER_SPELL_IDS[11585])
+assert(namespace.Scatter.SCATTER_SHOT_SPELL_ID == 19503)
+assert(namespace.Scatter.SCATTER_EVENT_DEDUP_SECONDS == 0.5)
+assert(namespace.Alerts.frames.scatter.mouseEnabled == false)
 assert(namespace.db.modules.enemyOverpower.showCountdown)
 assert(namespace.Options.category:GetID() == 77)
 assert(type(SlashCmdList.WESHARENAALERTS) == "function")
@@ -259,7 +286,146 @@ namespace.Arena:UpdateArenaState()
 assert(namespace.isInArena)
 assert(namespace.Arena.eventFrame.events.COMBAT_LOG_EVENT_UNFILTERED)
 assert(namespace.Arena.eventFrame.events.UNIT_AURA)
+assert(namespace.Arena.eventFrame.events.UNIT_SPELLCAST_SUCCEEDED)
 assert(namespace.Arena:GetOpponentByGUID("Enemy-Warrior-1").classFile == "WARRIOR")
+
+-- Milestone 0.4: a mapped enemy Hunter's successful Scatter cast flashes
+-- immediately from UNIT_SPELLCAST_SUCCEEDED without any destination or aura.
+arenaUnits.arena3 = { guid = "Enemy-Hunter-1", className = "Hunter", classFile = "HUNTER", classID = 3, name = "MarksOne" }
+Fire("ARENA_OPPONENT_UPDATE", "arena3", "seen")
+ResetScatter()
+now = 1000
+Fire("UNIT_SPELLCAST_SUCCEEDED", "arena3", "Cast-1", 19503)
+assert(namespace.Alerts.frames.scatter.showCount == 1)
+assert(namespace.Alerts.frames.scatter:IsShown())
+assert(namespace.Alerts.frames.scatter.alpha == 0.55)
+assert(namespace.Alerts.scatterDisplayMode == "runtime")
+assert(namespace.Scatter.lastScatterCast["Enemy-Hunter-1"] == 1000)
+
+-- The UNIT payload parser tolerates compatibility fields and takes the final
+-- numeric spell ID rather than assuming one fixed client signature.
+local parsedUnit, parsedSpellID = namespace.Scatter:ParseUnitSpellcastSucceeded(
+    "arena3", "Scatter Shot", "Rank 1", "Cast-compat", 17, 19503
+)
+assert(parsedUnit == "arena3" and parsedSpellID == 19503)
+
+-- UNIT and CLEU notifications for the same cast converge through per-GUID dedup.
+cleuPayload = {
+    now, "SPELL_CAST_SUCCESS", false, "Enemy-Hunter-1", "MarksOne", 0, 0,
+    "Arena-Teammate", "Friend", 0, 0, 19503, "Scatter Shot", 1,
+}
+Fire("COMBAT_LOG_EVENT_UNFILTERED")
+assert(namespace.Alerts.frames.scatter.showCount == 1)
+
+-- CLEU can arrive first, and destination is intentionally irrelevant.
+ResetScatter()
+now = 1001
+cleuPayload = {
+    now, "SPELL_CAST_SUCCESS", false, "Enemy-Hunter-1", "MarksOne", 0, 0,
+    "Arena-Teammate", "Friend", 0, 0, 19503, "Scatter Shot", 1,
+}
+Fire("COMBAT_LOG_EVENT_UNFILTERED")
+Fire("UNIT_SPELLCAST_SUCCEEDED", "arena3", "Cast-2", 19503)
+assert(namespace.Alerts.frames.scatter.showCount == 1)
+
+-- A new notification after the short merge window is a new cast, not blocked
+-- by a fabricated ability cooldown. A stale hide timer cannot hide its flash.
+ResetScatter()
+namespace.db.modules.scatter.duration = 1.0
+now = 1010
+Fire("UNIT_SPELLCAST_SUCCEEDED", "arena3", "Cast-3", 19503)
+now = 1010.6
+Fire("UNIT_SPELLCAST_SUCCEEDED", "arena3", "Cast-4", 19503)
+assert(namespace.Alerts.frames.scatter.showCount == 2)
+RunTimersThrough(1011)
+assert(namespace.Alerts.frames.scatter:IsShown())
+RunTimersThrough(1011.6)
+assert(not namespace.Alerts.frames.scatter:IsShown())
+
+-- A preview timer is likewise invalidated when a runtime cast takes over.
+ResetScatter()
+namespace.db.modules.scatter.duration = 1.0
+now = 1020
+namespace.Alerts:ShowScatterPreview()
+assert(not next(namespace.Scatter.lastScatterCast))
+now = 1020.2
+Fire("UNIT_SPELLCAST_SUCCEEDED", "arena3", "Cast-5", 19503)
+RunTimersThrough(1021)
+assert(namespace.Alerts.frames.scatter:IsShown())
+RunTimersThrough(1021.2)
+assert(not namespace.Alerts.frames.scatter:IsShown())
+
+-- A subsequent MISS/IMMUNE outcome neither triggers nor retracts the cast alert.
+ResetScatter()
+now = 1030
+namespace.Scatter:HandleCombatLogEvent(SpellEvent(
+    "SPELL_CAST_SUCCESS", "Enemy-Hunter-1", "Arena-Teammate", 19503
+))
+namespace.Scatter:HandleCombatLogEvent(MissEvent(
+    "SPELL_MISSED", "Enemy-Hunter-1", "Arena-Teammate", "IMMUNE", 19503
+))
+assert(namespace.Alerts.frames.scatter.showCount == 1)
+assert(namespace.Scatter.lastScatterCast["Enemy-Hunter-1"] == 1030)
+
+-- Late arena-unit metadata is refreshed safely from the unit token.
+ResetScatter()
+arenaUnits.arena4 = { guid = "Enemy-Hunter-Late", className = "Hunter", classFile = "HUNTER", classID = 3, name = "LateMap" }
+now = 1040
+Fire("UNIT_SPELLCAST_SUCCEEDED", "arena3", "Cast-same-time", 19503)
+Fire("UNIT_SPELLCAST_SUCCEEDED", "arena4", "Cast-late", 19503)
+assert(namespace.Arena:GetOpponentByGUID("Enemy-Hunter-Late").unit == "arena4")
+assert(namespace.Alerts.frames.scatter.showCount == 2)
+
+-- flashEnabled suppresses only presentation; the detector still accepts/dedups.
+ResetScatter()
+namespace.db.modules.scatter.flashEnabled = false
+now = 1050
+assert(namespace.Scatter:HandleCombatLogEvent(SpellEvent(
+    "SPELL_CAST_SUCCESS", "Enemy-Hunter-1", "Any-Destination", 19503
+)))
+assert(namespace.Scatter.lastScatterCast["Enemy-Hunter-1"] == 1050)
+AssertNoScatter("flashEnabled=false must suppress the visual")
+
+-- Negative source, class, spell, and mapping filters.
+ResetScatter()
+Fire("UNIT_SPELLCAST_SUCCEEDED", "arena2", "Rogue-cast", 19503)
+Fire("UNIT_SPELLCAST_SUCCEEDED", "arenapet3", "Pet-cast", 19503)
+Fire("UNIT_SPELLCAST_SUCCEEDED", "arena3", "Other-spell", 12345)
+namespace.Scatter:HandleCombatLogEvent(SpellEvent(
+    "SPELL_CAST_SUCCESS", "Friendly-Hunter", playerGUID, 19503
+))
+namespace.Scatter:HandleCombatLogEvent(SpellEvent(
+    "SPELL_CAST_SUCCESS", "Enemy-Hunter-Pet", playerGUID, 19503
+))
+namespace.Scatter:HandleCombatLogEvent(SpellEvent(
+    "SPELL_CAST_SUCCESS", "NPC-Hunter", playerGUID, 19503
+))
+namespace.Scatter:HandleCombatLogEvent(SpellEvent(
+    "SPELL_CAST_SUCCESS", "Unknown-Hunter", playerGUID, 19503
+))
+AssertNoScatter("only a mapped enemy Hunter using Scatter may flash")
+
+-- Module/master disable clears cast state and any active runtime visual.
+ResetScatter()
+now = 1060
+Fire("UNIT_SPELLCAST_SUCCEEDED", "arena3", "Cast-disable", 19503)
+namespace.db.modules.scatter.enabled = false
+namespace.Scatter:OnSettingsChanged()
+assert(not next(namespace.Scatter.lastScatterCast))
+assert(not namespace.Alerts.frames.scatter:IsShown(), "module disable must hide Scatter runtime")
+namespace.db.modules.scatter.enabled = true
+namespace.Alerts.frames.scatter.showCount = 0
+now = 1061
+Fire("UNIT_SPELLCAST_SUCCEEDED", "arena3", "Cast-master-disable", 19503)
+namespace.db.general.enabled = false
+namespace.Scatter:OnSettingsChanged()
+assert(not next(namespace.Scatter.lastScatterCast))
+assert(not namespace.Alerts.frames.scatter:IsShown(), "master disable must hide Scatter runtime")
+namespace.db.general.enabled = true
+
+-- Restore the Warrior used by the existing Drinking and Overpower regressions.
+arenaUnits.arena3 = { guid = "Enemy-Warrior-2", className = "Warrior", classFile = "WARRIOR", classID = 1, name = "ArmsTwo" }
+Fire("ARENA_OPPONENT_UPDATE", "arena3", "seen")
 
 -- Milestone 0.3: primary UNIT_AURA detection uses localized names, transitions,
 -- independent GUID states, and the existing single Drinking frame.
@@ -531,15 +697,24 @@ assert(namespace.Alerts.frames.enemyOverpower.scripts.OnUpdate)
 SetAura("arena2", "Drink", 430)
 Fire("UNIT_AURA", "arena2")
 assert(namespace.Drinking.drinkingByGUID["Enemy-Rogue"])
+arenaUnits.arena5 = { guid = "Enemy-Hunter-Exit", className = "Hunter", classFile = "HUNTER", classID = 3, name = "ExitMarks" }
+Fire("ARENA_OPPONENT_UPDATE", "arena5", "seen")
+ResetScatter()
+Fire("UNIT_SPELLCAST_SUCCEEDED", "arena5", "Cast-before-exit", 19503)
+assert(namespace.Alerts.frames.scatter:IsShown())
+assert(namespace.Scatter.lastScatterCast["Enemy-Hunter-Exit"])
 arenaState = false
 namespace.Arena:UpdateArenaState()
 assert(not namespace.isInArena)
 AssertNoOpportunity("arena exit must clean runtime")
 assert(not namespace.Drinking:HasActiveDrinker())
 assert(not namespace.Alerts.frames.drinking:IsShown())
+assert(not next(namespace.Scatter.lastScatterCast))
+assert(not namespace.Alerts.frames.scatter:IsShown())
 assert(not namespace.Arena:GetOpponentByGUID("Enemy-Warrior-1"))
 assert(not namespace.Arena.eventFrame.events.COMBAT_LOG_EVENT_UNFILTERED)
 assert(not namespace.Arena.eventFrame.events.UNIT_AURA)
+assert(not namespace.Arena.eventFrame.events.UNIT_SPELLCAST_SUCCEEDED)
 assert(namespace.Alerts.frames.enemyOverpower.scripts.OnUpdate == nil)
 
 -- 12 and manual-preview compatibility: detector input outside arena is ignored,
@@ -550,9 +725,17 @@ namespace.Drinking:HandleCombatLogEvent(AuraEvent("SPELL_AURA_APPLIED", "Enemy-R
 namespace.Drinking:ScanUnit("arena2", "UNIT_AURA")
 assert(not namespace.Drinking:HasActiveDrinker())
 assert(not namespace.Alerts.frames.drinking:IsShown())
+namespace.Alerts.frames.scatter.showCount = 0
+namespace.Scatter:HandleCombatLogEvent(SpellEvent(
+    "SPELL_CAST_SUCCESS", "Enemy-Hunter-Exit", playerGUID, 19503
+))
+Fire("UNIT_SPELLCAST_SUCCEEDED", "arena5", "Cast-outside", 19503)
+AssertNoScatter("Scatter outside arena must be ignored")
 namespace.Alerts:ShowDrinkingPreview()
 assert(namespace.Alerts.frames.drinking:IsShown())
 namespace.Alerts:ShowOverpowerPreview()
 assert(namespace.Alerts.frames.enemyOverpower:IsShown())
+namespace.Alerts:ShowScatterPreview()
+assert(namespace.Alerts.frames.scatter:IsShown())
 
 realPrint("WeshArenaAlerts smoke test passed")

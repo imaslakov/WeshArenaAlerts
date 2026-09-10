@@ -7,7 +7,6 @@ local POSITION_KEYS = { "drinking", "innerFire", "shieldAbsorb", "enemyOverpower
 
 local SPELLS = {
     drinking = 430,       -- Rank 1 Drink; only used to ask the client for its standard icon.
-    scatter = 19503,
     innerFire = 25431,
     shieldAbsorb = 25218, -- TBC rank used for texture lookup only; detection will be rank-agnostic.
     enemyOverpower = 7384,
@@ -15,7 +14,6 @@ local SPELLS = {
 
 local FALLBACK_ICONS = {
     drinking = "Interface\\Icons\\INV_Drink_07",
-    scatter = "Interface\\Icons\\Ability_GolemStormBolt",
     innerFire = "Interface\\Icons\\Spell_Holy_InnerFire",
     shieldAbsorb = "Interface\\Icons\\Spell_Holy_PowerWordShield",
     enemyOverpower = "Interface\\Icons\\Ability_MeleeDamage",
@@ -85,6 +83,7 @@ function Alerts:Initialize()
     self.overpowerDisplayMode = nil
     self.overpowerRuntimeActive = false
     self.overpowerUpdateElapsed = 0
+    self.scatterDisplayMode = nil
 
     self:CreateDrinkingFrame()
     self:CreateInnerFireFrame()
@@ -345,9 +344,47 @@ function Alerts:ShowScatterPreview()
         return
     end
     local frame = self.frames.scatter
+    local token = self:CancelHide("scatter")
+    self.scatterDisplayMode = "preview"
     frame:SetAlpha(settings.opacity)
     frame:Show()
-    self:ScheduleHide("scatter", settings.duration)
+    C_Timer.After(settings.duration, function()
+        if self.hideTokens.scatter ~= token or self.scatterDisplayMode ~= "preview" then
+            return
+        end
+        self.scatterDisplayMode = nil
+        frame:Hide()
+    end)
+end
+
+function Alerts:ShowScatterRuntime()
+    local settings = WAA.db.modules.scatter
+    if not settings.flashEnabled then
+        return false
+    end
+
+    local frame = self.frames.scatter
+    local token = self:CancelHide("scatter")
+    self.scatterDisplayMode = "runtime"
+    frame:SetAlpha(settings.opacity)
+    frame:Show()
+    C_Timer.After(settings.duration, function()
+        if self.hideTokens.scatter ~= token or self.scatterDisplayMode ~= "runtime" then
+            return
+        end
+        self.scatterDisplayMode = nil
+        frame:Hide()
+    end)
+    return true
+end
+
+function Alerts:HideScatterRuntime()
+    if self.scatterDisplayMode ~= "runtime" then
+        return
+    end
+    self:CancelHide("scatter")
+    self.frames.scatter:Hide()
+    self.scatterDisplayMode = nil
 end
 
 function Alerts:ShowInnerFirePreview(persistent)
@@ -514,6 +551,7 @@ function Alerts:ClearRuntime()
     self.drinkingDisplayMode = nil
     self.overpowerRuntimeActive = false
     self.overpowerDisplayMode = nil
+    self.scatterDisplayMode = nil
     for _, key in ipairs(POSITION_KEYS) do
         self:SetPositioningStyle(self.frames[key], false)
     end
