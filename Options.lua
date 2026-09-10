@@ -241,6 +241,9 @@ function Options:BuildGeneralPage()
         if WAA.Drinking then
             WAA.Drinking:OnSettingsChanged()
         end
+        if WAA.InnerFire then
+            WAA.InnerFire:OnSettingsChanged()
+        end
         if WAA.EnemyOverpower then
             WAA.EnemyOverpower:OnSettingsChanged()
         end
@@ -322,16 +325,24 @@ function Options:BuildScatterPage()
 end
 
 function Options:BuildInnerFirePage()
-    local page = self:CreatePage("innerFire", "Inner Fire", "Priest self-warning foundation for low Inner Fire charges.")
+    local page = self:CreatePage("innerFire", "Inner Fire", "Persistent Priest self-warning when Inner Fire is low or missing in an arena.")
     local db = function() return WAA.db.modules.innerFire end
-    self:CreateCheckbox(page, "Enabled", function() return db().enabled end, function(v) db().enabled = v end, -92)
+    self:CreateCheckbox(page, "Enabled", function() return db().enabled end, function(v)
+        db().enabled = v
+        WAA.InnerFire:OnSettingsChanged()
+    end, -92)
     self:CreateCheckbox(page, "Show stack count", function() return db().showStackCount end, function(v)
         db().showStackCount = v
+        WAA.InnerFire:OnSettingsChanged()
         self:RefreshPositioningPreview("innerFire")
     end, -128)
-    self:CreateSlider(page, "Warning threshold", 1, 20, 1, 0, function() return db().threshold end, function(v) db().threshold = v end, -184)
+    self:CreateSlider(page, "Warning threshold", 1, 20, 1, 0, function() return db().threshold end, function(v)
+        db().threshold = v
+        WAA.InnerFire:OnSettingsChanged()
+    end, -184)
     self:CreateSlider(page, "Icon size", 32, 128, 2, 0, function() return db().iconSize end, function(v)
         db().iconSize = v
+        WAA.InnerFire:OnSettingsChanged()
         self:RefreshPositioningPreview("innerFire")
     end, -257)
     self:CreateTestArea(page, function() WAA.Alerts:ShowInnerFirePreview() end, -344)

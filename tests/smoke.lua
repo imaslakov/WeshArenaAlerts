@@ -6,8 +6,10 @@ local soundCount = 0
 local openedSettings = 0
 local printed = {}
 local playerGUID = "Player-Self"
+local playerClassFile = "PRIEST"
 local arenaUnits = {}
 local unitAuras = {}
+local unitAuraCalls = 0
 local cleuPayload
 local unpackValues = table.unpack or unpack
 
@@ -57,6 +59,7 @@ function Object:Hide() self.shown = false end
 function Object:SetShown(value) self.shown = value end
 function Object:IsShown() return self.shown end
 function Object:SetAlpha(value) self.alpha = value end
+function Object:SetSize(width, height) self.width, self.height = width, height end
 function Object:EnableMouse(value) self.mouseEnabled = value end
 function Object:LockHighlight() self.highlighted = true end
 function Object:UnlockHighlight() self.highlighted = false end
@@ -107,15 +110,17 @@ function UnitGUID(unit)
     return arenaUnits[unit] and arenaUnits[unit].guid or nil
 end
 function UnitClass(unit)
+    if unit == "player" then return "Priest", playerClassFile, 5 end
     local opponent = arenaUnits[unit]
     if not opponent then return nil end
     return opponent.className, opponent.classFile, opponent.classID
 end
 function UnitName(unit) return arenaUnits[unit] and arenaUnits[unit].name or nil end
 function UnitAura(unit, index)
+    unitAuraCalls = unitAuraCalls + 1
     local aura = unitAuras[unit] and unitAuras[unit][index]
     if not aura then return nil end
-    return aura.name, nil, nil, nil, nil, nil, nil, nil, nil, aura.spellID
+    return aura.name, nil, aura.applications, nil, nil, nil, nil, nil, nil, aura.spellID
 end
 function IsInInstance() return arenaState, arenaState and "arena" or "none" end
 function CombatLogGetCurrentEventInfo() return unpackValues(cleuPayload) end
@@ -134,6 +139,7 @@ local files = {
     "Arena.lua",
     "EnemyOverpower.lua",
     "Drinking.lua",
+    "InnerFire.lua",
     "Scatter.lua",
     "Options.lua",
 }
@@ -171,6 +177,15 @@ local function CountEntries(target)
     local count = 0
     for _ in pairs(target) do count = count + 1 end
     return count
+end
+
+local function PrintedContains(fragment)
+    for _, message in ipairs(printed) do
+        if message:find(fragment, 1, true) then
+            return true
+        end
+    end
+    return false
 end
 
 local function AssertNoOpportunity(message)
@@ -241,8 +256,10 @@ local function AuraEvent(eventType, destGUID, spellID, spellName)
     }
 end
 
-local function SetAura(unit, spellName, spellID)
-    unitAuras[unit] = spellName and { { name = spellName, spellID = spellID } } or nil
+local function SetAura(unit, spellName, spellID, applications)
+    unitAuras[unit] = spellName and {
+        { name = spellName, spellID = spellID, applications = applications },
+    } or nil
 end
 
 Fire("ADDON_LOADED", "WeshArenaAlerts")
@@ -250,7 +267,7 @@ Fire("PLAYER_LOGIN")
 
 -- Milestone 0.1 compatibility smoke checks.
 assert(namespace.initialized)
-assert(namespace.version == "0.4.0")
+assert(namespace.version == "0.5.0")
 assert(namespace.Drinking.drinkAuraName == "Drink")
 assert(namespace.Drinking.KNOWN_DRINK_SPELL_IDS[430])
 assert(namespace.Drinking.KNOWN_DRINK_SPELL_IDS[43154])
@@ -261,6 +278,8 @@ assert(namespace.EnemyOverpower.OVERPOWER_SPELL_IDS[11584])
 assert(namespace.EnemyOverpower.OVERPOWER_SPELL_IDS[11585])
 assert(namespace.Scatter.SCATTER_SHOT_SPELL_ID == 19503)
 assert(namespace.Scatter.SCATTER_EVENT_DEDUP_SECONDS == 0.5)
+assert(namespace.InnerFire.INNER_FIRE_SPELL_IDS[588])
+assert(namespace.InnerFire.INNER_FIRE_SPELL_IDS[25431])
 assert(namespace.Alerts.frames.scatter.mouseEnabled == false)
 assert(namespace.db.modules.enemyOverpower.showCountdown)
 assert(namespace.Options.category:GetID() == 77)
@@ -288,6 +307,208 @@ assert(namespace.Arena.eventFrame.events.COMBAT_LOG_EVENT_UNFILTERED)
 assert(namespace.Arena.eventFrame.events.UNIT_AURA)
 assert(namespace.Arena.eventFrame.events.UNIT_SPELLCAST_SUCCEEDED)
 assert(namespace.Arena:GetOpponentByGUID("Enemy-Warrior-1").classFile == "WARRIOR")
+
+-- Milestone 0.5: the player aura is the only source of truth for the persistent
+-- Priest Inner Fire OK / LOW / MISSING state machine.
+assert(namespace.InnerFire.state == namespace.InnerFire.STATE_MISSING)
+assert(namespace.Alerts.frames.innerFire:IsShown())
+assert(namespace.Alerts.frames.innerFire.missing:IsShown())
+assert(not namespace.Alerts.frames.innerFire.count:IsShown())
+
+SetAura("player", "Inner Fire", 25431, 20)
+Fire("UNIT_AURA", "player")
+assert(namespace.InnerFire.state == namespace.InnerFire.STATE_OK)
+assert(namespace.InnerFire.isPresent and namespace.InnerFire.charges == 20)
+assert(namespace.InnerFire.spellID == 25431)
+assert(not namespace.Alerts.frames.innerFire:IsShown())
+
+SetAura("player", "Inner Fire", 25431, 6)
+Fire("UNIT_AURA", "player")
+assert(namespace.InnerFire.state == namespace.InnerFire.STATE_OK)
+SetAura("player", "Inner Fire", 25431, 5)
+Fire("UNIT_AURA", "player")
+assert(namespace.InnerFire.state == namespace.InnerFire.STATE_LOW)
+assert(namespace.Alerts.frames.innerFire:IsShown())
+assert(namespace.Alerts.frames.innerFire.count.text == "5")
+assert(namespace.Alerts.frames.innerFire.count:IsShown())
+assert(not namespace.Alerts.frames.innerFire.missing:IsShown())
+local innerShowCount = namespace.Alerts.frames.innerFire.showCount
+Fire("UNIT_AURA", "player")
+assert(namespace.Alerts.frames.innerFire.showCount == innerShowCount)
+
+for charges = 4, 1, -1 do
+    SetAura("player", "Inner Fire", 25431, charges)
+    Fire("UNIT_AURA", "player")
+    assert(namespace.InnerFire.state == namespace.InnerFire.STATE_LOW)
+    assert(namespace.InnerFire.charges == charges)
+    assert(namespace.Alerts.frames.innerFire.count.text == tostring(charges))
+    assert(namespace.Alerts.frames.innerFire.showCount == innerShowCount)
+end
+
+SetAura("player", "Inner Fire", 25431, 20)
+Fire("UNIT_AURA", "player")
+assert(namespace.InnerFire.state == namespace.InnerFire.STATE_OK)
+assert(not namespace.Alerts.frames.innerFire:IsShown())
+
+-- LOW -> MISSING and MISSING -> LOW reuse the same visible frame without a hide/show.
+SetAura("player", "Inner Fire", 10952, 3)
+Fire("UNIT_AURA", "player")
+innerShowCount = namespace.Alerts.frames.innerFire.showCount
+SetAura("player")
+Fire("UNIT_AURA", "player")
+assert(namespace.InnerFire.state == namespace.InnerFire.STATE_MISSING)
+assert(namespace.Alerts.frames.innerFire:IsShown())
+assert(namespace.Alerts.frames.innerFire.showCount == innerShowCount)
+assert(namespace.Alerts.frames.innerFire.missing:IsShown())
+assert(not namespace.Alerts.frames.innerFire.count:IsShown())
+Fire("UNIT_AURA", "player")
+assert(namespace.Alerts.frames.innerFire.showCount == innerShowCount)
+SetAura("player", "Inner Fire", 588, 4)
+Fire("UNIT_AURA", "player")
+assert(namespace.InnerFire.state == namespace.InnerFire.STATE_LOW)
+assert(namespace.InnerFire.spellID == 588)
+assert(namespace.Alerts.frames.innerFire.showCount == innerShowCount)
+assert(not namespace.Alerts.frames.innerFire.missing:IsShown())
+assert(namespace.Alerts.frames.innerFire.count.text == "4")
+
+-- A present aura with an unusable count is neither LOW nor MISSING.
+SetAura("player", "Inner Fire", 7128, nil)
+Fire("UNIT_AURA", "player")
+assert(namespace.InnerFire.state == namespace.InnerFire.STATE_PRESENT_COUNT_UNKNOWN)
+assert(namespace.InnerFire.isPresent and namespace.InnerFire.charges == nil)
+assert(not namespace.Alerts.frames.innerFire:IsShown())
+
+-- A different five-stack buff cannot be mistaken for Inner Fire.
+SetAura("player", "Other Buff", 12345, 5)
+Fire("UNIT_AURA", "player")
+assert(namespace.InnerFire.state == namespace.InnerFire.STATE_MISSING)
+assert(namespace.Alerts.frames.innerFire.missing:IsShown())
+
+-- Live threshold and presentation settings use tracked aura data; no reload or rescan.
+SetAura("player", "Inner Fire", 602, 6)
+Fire("UNIT_AURA", "player")
+assert(namespace.InnerFire.state == namespace.InnerFire.STATE_OK)
+namespace.db.modules.innerFire.threshold = 7
+namespace.InnerFire:OnSettingsChanged()
+assert(namespace.InnerFire.state == namespace.InnerFire.STATE_LOW)
+assert(namespace.Alerts.frames.innerFire.count.text == "6")
+namespace.db.modules.innerFire.showStackCount = false
+namespace.InnerFire:OnSettingsChanged()
+assert(namespace.Alerts.frames.innerFire:IsShown())
+assert(not namespace.Alerts.frames.innerFire.count:IsShown())
+namespace.db.modules.innerFire.showStackCount = true
+namespace.InnerFire:OnSettingsChanged()
+assert(namespace.Alerts.frames.innerFire.count:IsShown())
+namespace.db.modules.innerFire.iconSize = 96
+namespace.InnerFire:OnSettingsChanged()
+assert(namespace.Alerts.frames.innerFire.icon.width == 96)
+namespace.db.modules.innerFire.threshold = 5
+namespace.InnerFire:OnSettingsChanged()
+assert(namespace.InnerFire.state == namespace.InnerFire.STATE_OK)
+assert(not namespace.Alerts.frames.innerFire:IsShown())
+
+SetAura("player")
+Fire("UNIT_AURA", "player")
+namespace.db.modules.innerFire.threshold = 7
+namespace.InnerFire:OnSettingsChanged()
+assert(namespace.InnerFire.state == namespace.InnerFire.STATE_MISSING)
+assert(not namespace.Alerts.frames.innerFire.count:IsShown())
+
+-- Disable cleanup and in-arena re-enable both perform the expected lifecycle work.
+namespace.db.modules.innerFire.enabled = false
+namespace.InnerFire:OnSettingsChanged()
+assert(namespace.InnerFire.state == nil and not namespace.InnerFire.isPresent)
+assert(not namespace.Alerts.frames.innerFire:IsShown())
+SetAura("player", "Inner Fire", 1006, 4)
+namespace.db.modules.innerFire.enabled = true
+namespace.InnerFire:OnSettingsChanged()
+assert(namespace.InnerFire.state == namespace.InnerFire.STATE_LOW)
+assert(namespace.InnerFire.charges == 4)
+namespace.db.general.enabled = false
+namespace.InnerFire:OnSettingsChanged()
+assert(namespace.InnerFire.state == nil)
+assert(not namespace.Alerts.frames.innerFire:IsShown())
+SetAura("player")
+namespace.db.general.enabled = true
+namespace.InnerFire:OnSettingsChanged()
+assert(namespace.InnerFire.state == namespace.InnerFire.STATE_MISSING)
+
+-- Non-Priests are rejected before any aura scan, including the MISSING case.
+namespace.InnerFire:ClearRuntime()
+playerClassFile = "MAGE"
+unitAuraCalls = 0
+Fire("UNIT_AURA", "player")
+assert(unitAuraCalls == 0)
+assert(namespace.InnerFire.state == nil)
+assert(not namespace.Alerts.frames.innerFire:IsShown())
+playerClassFile = "PRIEST"
+
+-- Arena exit clears LOW immediately; re-entry performs a fresh one-time scan.
+SetAura("player", "Inner Fire", 10952, 4)
+Fire("UNIT_AURA", "player")
+assert(namespace.InnerFire.state == namespace.InnerFire.STATE_LOW)
+arenaState = false
+namespace.Arena:UpdateArenaState()
+assert(namespace.InnerFire.state == nil)
+assert(not namespace.Alerts.frames.innerFire:IsShown())
+SetAura("player", "Inner Fire", 25431, 20)
+arenaState = true
+namespace.Arena:UpdateArenaState()
+assert(namespace.InnerFire.state == namespace.InnerFire.STATE_OK)
+assert(namespace.InnerFire.charges == 20)
+assert(not namespace.Alerts.frames.innerFire:IsShown())
+
+-- Modern AuraData is preferred; removing it exercises the legacy UnitAura fallback.
+local modernAura = { spellId = 10951, applications = 4 }
+C_UnitAuras = {
+    GetAuraDataByIndex = function(_, index)
+        if index == 1 then return modernAura end
+        return nil
+    end,
+}
+unitAuraCalls = 0
+Fire("UNIT_AURA", "player")
+assert(namespace.InnerFire.state == namespace.InnerFire.STATE_LOW)
+assert(namespace.InnerFire.spellID == 10951 and namespace.InnerFire.charges == 4)
+assert(unitAuraCalls == 0)
+C_UnitAuras = nil
+SetAura("player", "Inner Fire", 25431, 20)
+Fire("UNIT_AURA", "player")
+assert(namespace.InnerFire.state == namespace.InnerFire.STATE_OK)
+assert(unitAuraCalls > 0)
+
+-- Debug mode exposes state transitions, charge updates, removal, and bad counts.
+namespace.db.modules.innerFire.threshold = 5
+namespace.InnerFire:OnSettingsChanged()
+namespace.debugEnabled = true
+namespace.db.general.debug = true
+SetAura("player", "Inner Fire", 25431, 6)
+Fire("UNIT_AURA", "player")
+SetAura("player", "Inner Fire", 25431, 5)
+Fire("UNIT_AURA", "player")
+SetAura("player", "Inner Fire", 25431, 4)
+Fire("UNIT_AURA", "player")
+SetAura("player")
+Fire("UNIT_AURA", "player")
+SetAura("player", "Inner Fire", 25431, 20)
+Fire("UNIT_AURA", "player")
+SetAura("player", "Inner Fire", 25431, nil)
+Fire("UNIT_AURA", "player")
+assert(PrintedContains("Inner Fire charges: 6 -> 5"))
+assert(PrintedContains("Inner Fire state: OK -> LOW charges=5 threshold=5"))
+assert(PrintedContains("Inner Fire LOW UPDATE: 5 -> 4"))
+assert(PrintedContains("Inner Fire removed"))
+assert(PrintedContains("Inner Fire state: LOW -> MISSING"))
+assert(PrintedContains("Inner Fire state: MISSING -> OK charges=20"))
+assert(PrintedContains("Inner Fire count unavailable: spellID=25431"))
+namespace.debugEnabled = false
+namespace.db.general.debug = false
+
+-- Preview is independent of the tracked runtime snapshot.
+local previewState, previewCharges = namespace.InnerFire.state, namespace.InnerFire.charges
+namespace.Alerts:ShowInnerFirePreview()
+assert(namespace.Alerts.frames.innerFire:IsShown())
+assert(namespace.InnerFire.state == previewState and namespace.InnerFire.charges == previewCharges)
 
 -- Milestone 0.4: a mapped enemy Hunter's successful Scatter cast flashes
 -- immediately from UNIT_SPELLCAST_SUCCEEDED without any destination or aura.
@@ -694,6 +915,10 @@ Fire("ARENA_OPPONENT_UPDATE", "arena1", "seen")
 -- 17. Arena exit clears states, mappings, listener, updater, and frame.
 namespace.EnemyOverpower:HandleCombatLogEvent(MissEvent("SWING_MISSED", "Enemy-Warrior-1", playerGUID, "DODGE"))
 assert(namespace.Alerts.frames.enemyOverpower.scripts.OnUpdate)
+SetAura("player")
+Fire("UNIT_AURA", "player")
+assert(namespace.InnerFire.state == namespace.InnerFire.STATE_MISSING)
+assert(namespace.Alerts.frames.innerFire:IsShown())
 SetAura("arena2", "Drink", 430)
 Fire("UNIT_AURA", "arena2")
 assert(namespace.Drinking.drinkingByGUID["Enemy-Rogue"])
@@ -711,6 +936,9 @@ assert(not namespace.Drinking:HasActiveDrinker())
 assert(not namespace.Alerts.frames.drinking:IsShown())
 assert(not next(namespace.Scatter.lastScatterCast))
 assert(not namespace.Alerts.frames.scatter:IsShown())
+assert(namespace.InnerFire.state == nil and not namespace.InnerFire.isPresent)
+assert(namespace.InnerFire.charges == nil and namespace.InnerFire.spellID == nil)
+assert(not namespace.Alerts.frames.innerFire:IsShown())
 assert(not namespace.Arena:GetOpponentByGUID("Enemy-Warrior-1"))
 assert(not namespace.Arena.eventFrame.events.COMBAT_LOG_EVENT_UNFILTERED)
 assert(not namespace.Arena.eventFrame.events.UNIT_AURA)
@@ -737,5 +965,12 @@ namespace.Alerts:ShowOverpowerPreview()
 assert(namespace.Alerts.frames.enemyOverpower:IsShown())
 namespace.Alerts:ShowScatterPreview()
 assert(namespace.Alerts.frames.scatter:IsShown())
+SetAura("player", "Inner Fire", 25431, 2)
+Fire("UNIT_AURA", "player")
+assert(namespace.InnerFire.state == nil)
+assert(not namespace.Alerts.frames.innerFire:IsShown())
+namespace.Alerts:ShowInnerFirePreview()
+assert(namespace.Alerts.frames.innerFire:IsShown())
+assert(namespace.InnerFire.state == nil and namespace.InnerFire.charges == nil)
 
 realPrint("WeshArenaAlerts smoke test passed")

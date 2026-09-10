@@ -54,6 +54,9 @@ function Arena:Activate()
     self.eventFrame:RegisterEvent("ARENA_OPPONENT_UPDATE")
     self:RefreshOpponents()
     self:RefreshRuntimeRegistrations()
+    if WAA.InnerFire then
+        WAA.InnerFire:OnArenaActivated()
+    end
     WAA:Debug("Arena runtime activated")
 end
 
@@ -65,6 +68,9 @@ function Arena:Deactivate()
     end
     if WAA.Drinking then
         WAA.Drinking:ClearRuntime()
+    end
+    if WAA.InnerFire then
+        WAA.InnerFire:ClearRuntime()
     end
     if WAA.Scatter then
         WAA.Scatter:ClearRuntime()

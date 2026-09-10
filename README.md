@@ -8,6 +8,20 @@ WeshArenaAlerts is an arena-focused alert addon for **World of Warcraft: The Bur
 2. Confirm that **WeshArenaAlerts** is enabled on the character-selection AddOns screen.
 3. Open the settings with `Esc -> Options -> AddOns -> WeshArenaAlerts` or `/waa`.
 
+## Milestone 0.5
+
+Version 0.5.0 adds the automatic **Self Inner Fire Maintenance Alert** for the addon owner when playing a Priest. It is active only inside arena instances and uses the player's actual helpful aura as its source of truth.
+
+The module has three visual runtime states:
+
+* `OK`: Inner Fire is present with more charges than the configured threshold; the warning is hidden.
+* `LOW`: Inner Fire is present with charges at or below the threshold; the existing Inner Fire frame remains visible with a red overlay and, when enabled, the current remaining charge count.
+* `MISSING`: Inner Fire is absent; the same frame remains visible with a red overlay and `MISSING` label, while the numeric count is always hidden.
+
+The default low-charge threshold is `5`. Recasting Inner Fire with a normal charge count hides a `LOW` or `MISSING` warning immediately. Threshold, stack-count visibility, and icon-size changes apply live. Arena exit, master disable, and module disable clear the tracked state and hide the runtime warning; the Settings preview remains available outside arenas and for non-Priest characters.
+
+All normal TBC player ranks (`588`, `7128`, `602`, `1006`, `10951`, `10952`, and `25431`) are recognized by spell ID. The primary detector is `C_UnitAuras.GetAuraDataByIndex`; `UnitAura` is the legacy fallback. Remaining charges come directly from AuraData `applications` or the legacy aura `count`. If a present Inner Fire aura has no valid count, the module records a present-count-unknown state and suppresses both false `LOW` and false `MISSING` warnings. It does not reconstruct charges from the combat log, timers, incoming hits, or spell cooldowns.
+
 ## Milestone 0.4
 
 Version 0.4.0 adds the automatic **Enemy Scatter Shot Reaction Alert**. When a mapped enemy Hunter successfully uses Scatter Shot (`spellID 19503`), the existing red fullscreen overlay flashes immediately. `UNIT_SPELLCAST_SUCCEEDED` for `arena1` through `arena5` is the preferred low-latency source; `SPELL_CAST_SUCCESS` from the shared combat-log dispatcher is the fallback.
@@ -22,8 +36,8 @@ The **Enemy Drinking** detector from Milestone 0.3 remains available. While the 
 
 Drink recognition primarily compares the aura name with the client's localized canonical Drink spell name. A small, non-exhaustive set of known TBC Drink spell IDs is used only as a fallback, so detection is not tied to one rank or type of water. Multiple enemy GUIDs can be tracked simultaneously, and arena exit, opponent removal, or disabling the module clears runtime state.
 
-The **Enemy Overpower Opportunity** module from Milestone 0.2 remains available with its 5-second reconstructed opportunity window. Inner Fire and Power Word: Shield absorb remain manual-preview-only modules.
+The **Enemy Overpower Opportunity** module from Milestone 0.2 remains available with its 5-second reconstructed opportunity window. Power Word: Shield absorb remains a manual-preview-only module.
 
 Use `/waa debug` to toggle internal arena mapping and combat-log diagnostics before a test. Plain `/waa` continues to open Settings.
 
-**Milestones 0.1-0.4 still require real validation in the TBC Anniversary 2.5.6 client.** In particular, an arena test must confirm whether `UNIT_SPELLCAST_SUCCEEDED` is exposed for enemy arena units and whether it arrives before `SPELL_CAST_SUCCESS` on this client build.
+**Milestones 0.1-0.5 still require real validation in the TBC Anniversary 2.5.6 client.** In particular, an arena test must confirm the live Inner Fire aura payload (`applications`/legacy `count`) for every rank, plus whether `UNIT_SPELLCAST_SUCCEEDED` is exposed for enemy arena units and whether it arrives before `SPELL_CAST_SUCCESS` on this client build.

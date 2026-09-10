@@ -80,6 +80,8 @@ function Alerts:Initialize()
     self.positioningMode = false
     self.drinkingDisplayMode = nil
     self.drinkingRuntimeActive = false
+    self.innerFireDisplayMode = nil
+    self.innerFireRuntimeActive = false
     self.overpowerDisplayMode = nil
     self.overpowerRuntimeActive = false
     self.overpowerUpdateElapsed = 0
@@ -146,6 +148,20 @@ function Alerts:CreateInnerFireFrame()
     count:SetText("5")
     count:SetTextColor(1, 0.9, 0.2)
     frame.count = count
+
+    local redOverlay = frame:CreateTexture(nil, "ARTWORK")
+    redOverlay:SetPoint("TOPLEFT", icon, "TOPLEFT", 0, 0)
+    redOverlay:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", 0, 0)
+    redOverlay:SetColorTexture(1, 0, 0, 0.18)
+    frame.redOverlay = redOverlay
+
+    local missing = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    missing:SetPoint("BOTTOM", icon, "BOTTOM", 0, 5)
+    missing:SetText("MISSING")
+    missing:SetTextColor(1, 0.15, 0.1)
+    missing:SetShadowOffset(1, -1)
+    missing:Hide()
+    frame.missing = missing
 end
 
 function Alerts:CreateShieldFrame()
@@ -247,9 +263,13 @@ function Alerts:LockFrames()
         frame:Hide()
     end
     self.drinkingDisplayMode = nil
+    self.innerFireDisplayMode = nil
     self.overpowerDisplayMode = nil
     if WAA.EnemyOverpower then
         WAA.EnemyOverpower:RefreshVisual(false)
+    end
+    if WAA.InnerFire then
+        WAA.InnerFire:RefreshVisual()
     end
 end
 
@@ -387,22 +407,73 @@ function Alerts:HideScatterRuntime()
     self.scatterDisplayMode = nil
 end
 
-function Alerts:ShowInnerFirePreview(persistent)
+function Alerts:ApplyInnerFireSettings(state, charges)
     local settings = WAA.db.modules.innerFire
     local frame = self.frames.innerFire
     frame:SetSize(settings.iconSize + 36, settings.iconSize + 36)
     frame.icon:SetSize(settings.iconSize, settings.iconSize)
-    if settings.showStackCount then
-        frame.count:Show()
-    else
+    frame.redOverlay:Show()
+
+    if state == "MISSING" then
         frame.count:Hide()
+        frame.missing:Show()
+    else
+        frame.count:SetText(tostring(charges or settings.threshold))
+        frame.missing:Hide()
+        if settings.showStackCount then
+            frame.count:Show()
+        else
+            frame.count:Hide()
+        end
     end
+end
+
+function Alerts:ShowInnerFirePreview(persistent)
+    local frame = self.frames.innerFire
+    local token = self:CancelHide("innerFire")
+    self.innerFireDisplayMode = "preview"
+    self:ApplyInnerFireSettings("LOW", WAA.db.modules.innerFire.threshold)
     frame:Show()
     if persistent then
-        self:CancelHide("innerFire")
-    else
-        self:ScheduleHide("innerFire", 4)
+        return
     end
+
+    C_Timer.After(4, function()
+        if self.hideTokens.innerFire ~= token or self.innerFireDisplayMode ~= "preview" then
+            return
+        end
+        self.innerFireDisplayMode = nil
+        if self.innerFireRuntimeActive and WAA.InnerFire then
+            WAA.InnerFire:RefreshVisual()
+        elseif not self.positioningMode then
+            frame:Hide()
+        end
+    end)
+end
+
+function Alerts:ShowInnerFireRuntime(state, charges)
+    self.innerFireRuntimeActive = true
+    if self.positioningMode or self.innerFireDisplayMode == "preview" then
+        return
+    end
+
+    local frame = self.frames.innerFire
+    self:CancelHide("innerFire")
+    self.innerFireDisplayMode = "runtime"
+    self:ApplyInnerFireSettings(state, charges)
+    if not frame:IsShown() then
+        frame:Show()
+    end
+end
+
+function Alerts:HideInnerFireRuntime()
+    self.innerFireRuntimeActive = false
+    if self.innerFireDisplayMode ~= "runtime" then
+        return
+    end
+    self:CancelHide("innerFire")
+    self.frames.innerFire:Hide()
+    self.innerFireDisplayMode = nil
 end
 
 function Alerts:ShowShieldPreview(persistent)
@@ -549,6 +620,8 @@ function Alerts:ClearRuntime()
     self:HideAll()
     self.drinkingRuntimeActive = false
     self.drinkingDisplayMode = nil
+    self.innerFireRuntimeActive = false
+    self.innerFireDisplayMode = nil
     self.overpowerRuntimeActive = false
     self.overpowerDisplayMode = nil
     self.scatterDisplayMode = nil

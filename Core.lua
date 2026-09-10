@@ -1,7 +1,7 @@
 local addonName, WAA = ...
 
 WAA.name = addonName
-WAA.version = "0.4.0"
+WAA.version = "0.5.0"
 WAA.isInArena = false
 WAA.isUnlocked = false
 WAA.initialized = false
@@ -55,6 +55,9 @@ function WAA:ResetAllSettings()
     if self.Drinking then
         self.Drinking:OnSettingsChanged()
     end
+    if self.InnerFire then
+        self.InnerFire:OnSettingsChanged()
+    end
     if self.EnemyOverpower then
         self.EnemyOverpower:OnSettingsChanged()
     end
@@ -100,6 +103,7 @@ function WAA:Initialize()
     self.Arena:Initialize()
     self.EnemyOverpower:Initialize()
     self.Drinking:Initialize()
+    self.InnerFire:Initialize()
     self.Scatter:Initialize()
     self.initialized = true
     self:Debug("Initialized", self.version)
