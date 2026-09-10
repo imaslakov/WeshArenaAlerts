@@ -57,6 +57,9 @@ function Arena:Activate()
     if WAA.InnerFire then
         WAA.InnerFire:OnArenaActivated()
     end
+    if WAA.ClassIcon and WAA.ClassIcon.initialized then
+        WAA.ClassIcon:OnArenaActivated()
+    end
     WAA:Debug("Arena runtime activated")
 end
 
@@ -75,6 +78,9 @@ function Arena:Deactivate()
     if WAA.Scatter then
         WAA.Scatter:ClearRuntime()
     end
+    if WAA.ClassIcon then
+        WAA.ClassIcon:ClearRuntime()
+    end
     self:ClearOpponentData()
     WAA.Alerts:ClearRuntime()
     WAA:Debug("Arena runtime deactivated")
@@ -85,7 +91,7 @@ function Arena:ClearOpponentData()
     wipe(self.opponentsByGUID)
 end
 
-function Arena:UpdateOpponent(unitToken, updateType)
+function Arena:UpdateOpponent(unitToken, updateType, deferClassIconRefresh)
     if not WAA.isInArena or not unitToken then
         return
     end
@@ -108,6 +114,9 @@ function Arena:UpdateOpponent(unitToken, updateType)
 
     if not guid then
         self.opponents[unitToken] = nil
+        if not deferClassIconRefresh and WAA.ClassIcon and WAA.ClassIcon.initialized then
+            WAA.ClassIcon:OnOpponentMappingChanged(unitToken)
+        end
         return
     end
 
@@ -132,6 +141,9 @@ function Arena:UpdateOpponent(unitToken, updateType)
     if WAA.Drinking then
         WAA.Drinking:OnOpponentMapped(unitToken)
     end
+    if not deferClassIconRefresh and WAA.ClassIcon and WAA.ClassIcon.initialized then
+        WAA.ClassIcon:OnOpponentMappingChanged(unitToken)
+    end
 end
 
 function Arena:RefreshOpponents()
@@ -139,7 +151,10 @@ function Arena:RefreshOpponents()
         return
     end
     for _, unitToken in ipairs(ARENA_UNITS) do
-        self:UpdateOpponent(unitToken)
+        self:UpdateOpponent(unitToken, nil, true)
+    end
+    if WAA.ClassIcon and WAA.ClassIcon.initialized then
+        WAA.ClassIcon:RefreshVisibleNameplates("mapping")
     end
 end
 

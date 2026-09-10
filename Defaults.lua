@@ -24,6 +24,13 @@ WAA.Defaults = {
             iconSize = 72,
             showStackCount = true,
         },
+        classIcon = {
+            enabled = true,
+            iconSize = 28,
+            offsetX = 0,
+            offsetY = 4,
+            showBorder = true,
+        },
         shieldAbsorb = {
             enabled = true,
             iconSize = 72,

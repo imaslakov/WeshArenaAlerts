@@ -8,6 +8,18 @@ WeshArenaAlerts is an arena-focused alert addon for **World of Warcraft: The Bur
 2. Confirm that **WeshArenaAlerts** is enabled on the character-selection AddOns screen.
 3. Open the settings with `Esc -> Options -> AddOns -> WeshArenaAlerts` or `/waa`.
 
+## Milestone 0.6
+
+Version 0.6.0 adds **Enemy Class Icon over Nameplate**. While the arena runtime is active, a large class icon is anchored above each currently visible Blizzard nameplate whose unit GUID matches one of the mapped `arena1` through `arena5` opponent GUIDs. The match is authoritative and GUID-based: pets, totems, guardians, NPCs, friendly players, and unrelated enemy players do not receive icons.
+
+The module supports all nine TBC player classes and uses the standard Blizzard class-icon sheet (`Interface\Glues\CharacterCreate\UI-CharacterCreate-Classes`). It prefers the client's `CLASS_ICON_TCOORDS` and has local coordinates for the nine TBC classes as a compatibility fallback. Icon size, horizontal offset, vertical offset, and border visibility apply live and persist through the existing recursive SavedVariables merge.
+
+Runtime visuals are non-interactive child frames anchored to the base nameplate (or its `UnitFrame` when available). They never enable mouse input, change Blizzard nameplate dimensions or regions, or create protected actions. `NAME_PLATE_UNIT_ADDED` and `NAME_PLATE_UNIT_REMOVED` are the normal event-driven path; there is no periodic scan or `OnUpdate`. A small frame pool safely handles reused `nameplateN` tokens by replacing GUID/class metadata and texture state on every addition.
+
+Arena mapping changes trigger a one-shot visible-nameplate refresh, covering nameplates that appeared before `ARENA_OPPONENT_UPDATE`. Arena activation also refreshes plates already visible after `/reload`; arena exit and master/module disable immediately hide all icons and clear runtime associations. Settings includes a static Priest fake-nameplate preview that works outside arenas without creating runtime mappings.
+
+Third-party nameplate compatibility (Plater, Threat Plates, Kui, ElvUI, and similar addons) awaits real in-game testing. The implementation only obtains the Blizzard base frame through `C_NamePlate` and anchors a child visual without modifying nameplate internals.
+
 ## Milestone 0.5
 
 Version 0.5.0 adds the automatic **Self Inner Fire Maintenance Alert** for the addon owner when playing a Priest. It is active only inside arena instances and uses the player's actual helpful aura as its source of truth.
@@ -40,4 +52,4 @@ The **Enemy Overpower Opportunity** module from Milestone 0.2 remains available 
 
 Use `/waa debug` to toggle internal arena mapping and combat-log diagnostics before a test. Plain `/waa` continues to open Settings.
 
-**Milestones 0.1-0.5 still require real validation in the TBC Anniversary 2.5.6 client.** In particular, an arena test must confirm the live Inner Fire aura payload (`applications`/legacy `count`) for every rank, plus whether `UNIT_SPELLCAST_SUCCEEDED` is exposed for enemy arena units and whether it arrives before `SPELL_CAST_SUCCESS` on this client build.
+**Milestones 0.1-0.6 still require real validation in the TBC Anniversary 2.5.6 client.** In particular, an arena test must confirm the live Inner Fire aura payload (`applications`/legacy `count`) for every rank; whether `UNIT_SPELLCAST_SUCCEEDED` is exposed for enemy arena units and arrives before `SPELL_CAST_SUCCESS`; the Anniversary nameplate token fields and `C_NamePlate` behavior during arena start and `/reload`; the icon anchor height on stock nameplates; and practical compatibility with third-party nameplate addons.

@@ -8,6 +8,7 @@ local NAV_ITEMS = {
     { key = "drinking", label = "Drinking" },
     { key = "scatter", label = "Scatter" },
     { key = "innerFire", label = "Inner Fire" },
+    { key = "classIcon", label = "Enemy Class Icon" },
     { key = "shieldAbsorb", label = "Shield Absorb" },
     { key = "enemyOverpower", label = "Enemy Overpower" },
 }
@@ -94,6 +95,7 @@ function Options:CreatePanel()
     self:BuildDrinkingPage()
     self:BuildScatterPage()
     self:BuildInnerFirePage()
+    self:BuildClassIconPage()
     self:BuildShieldPage()
     self:BuildOverpowerPage()
     self:SelectPage("general")
@@ -250,6 +252,9 @@ function Options:BuildGeneralPage()
         if WAA.Scatter then
             WAA.Scatter:OnSettingsChanged()
         end
+        if WAA.ClassIcon then
+            WAA.ClassIcon:OnSettingsChanged()
+        end
     end, -92)
 
     local heading = CreateLabel(page, "Positioning / Preview", "GameFontNormal")
@@ -290,6 +295,79 @@ function Options:BuildGeneralPage()
             status:SetTextColor(0.65, 0.65, 0.65)
         end
     end)
+end
+
+function Options:BuildClassIconPage()
+    local page = self:CreatePage(
+        "classIcon",
+        "Enemy Class Icon",
+        "Shows a large class icon above each visible nameplate whose GUID matches a mapped arena opponent. The sample below is preview-only."
+    )
+    local db = function() return WAA.db.modules.classIcon end
+    self:CreateCheckbox(page, "Enabled", function() return db().enabled end, function(v)
+        db().enabled = v
+        WAA.ClassIcon:OnSettingsChanged()
+    end, -92)
+    self:CreateCheckbox(page, "Show border", function() return db().showBorder end, function(v)
+        db().showBorder = v
+        WAA.ClassIcon:OnSettingsChanged()
+        self:UpdateClassIconPreview()
+    end, -128)
+    self:CreateSlider(page, "Icon size", 16, 64, 1, 0, function() return db().iconSize end, function(v)
+        db().iconSize = v
+        WAA.ClassIcon:OnSettingsChanged()
+        self:UpdateClassIconPreview()
+    end, -174)
+    self:CreateSlider(page, "Horizontal offset", -50, 50, 1, 0, function() return db().offsetX end, function(v)
+        db().offsetX = v
+        WAA.ClassIcon:OnSettingsChanged()
+        self:UpdateClassIconPreview()
+    end, -237)
+    self:CreateSlider(page, "Vertical offset", -30, 80, 1, 0, function() return db().offsetY end, function(v)
+        db().offsetY = v
+        WAA.ClassIcon:OnSettingsChanged()
+        self:UpdateClassIconPreview()
+    end, -300)
+
+    local previewLabel = CreateLabel(page, "Class Icon Preview", "GameFontNormal")
+    previewLabel:SetPoint("TOPLEFT", 24, -370)
+    previewLabel:SetTextColor(1, 0.82, 0.25)
+
+    local preview = CreateFrame("Frame", nil, page)
+    preview:SetSize(360, 96)
+    preview:SetPoint("TOPLEFT", 24, -392)
+    AddBackground(preview, 0.02, 0.03, 0.04, 0.8)
+
+    local fakePlate = CreateFrame("Frame", nil, preview)
+    fakePlate:SetSize(220, 34)
+    fakePlate:SetPoint("BOTTOM", preview, "BOTTOM", 0, 12)
+    local enemyName = CreateLabel(fakePlate, "Enemy Name", "GameFontHighlightSmall")
+    enemyName:SetPoint("BOTTOM", fakePlate, "BOTTOM", 0, 14)
+    local healthBar = fakePlate:CreateTexture(nil, "ARTWORK")
+    healthBar:SetPoint("BOTTOM", fakePlate, "BOTTOM", 0, 0)
+    healthBar:SetSize(180, 11)
+    healthBar:SetColorTexture(0.55, 0.08, 0.08, 1)
+
+    local iconFrame = WAA.ClassIcon:CreateIconFrame(fakePlate)
+    iconFrame.isPreview = true
+    self.classIconPreview = { iconFrame = iconFrame, anchor = fakePlate }
+    self:UpdateClassIconPreview()
+    table.insert(self.refreshers, function()
+        self:UpdateClassIconPreview()
+    end)
+end
+
+function Options:UpdateClassIconPreview()
+    local preview = self.classIconPreview
+    if not preview or not WAA.ClassIcon then
+        return
+    end
+    WAA.ClassIcon:ApplyVisualSettings(preview.iconFrame, preview.anchor)
+    if WAA.ClassIcon:SetClassTexture(preview.iconFrame.icon, "PRIEST") then
+        preview.iconFrame:Show()
+    else
+        preview.iconFrame:Hide()
+    end
 end
 
 function Options:BuildDrinkingPage()

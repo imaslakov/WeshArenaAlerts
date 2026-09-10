@@ -8,6 +8,8 @@ local printed = {}
 local playerGUID = "Player-Self"
 local playerClassFile = "PRIEST"
 local arenaUnits = {}
+local nameplateUnits = {}
+local nameplates = {}
 local unitAuras = {}
 local unitAuraCalls = 0
 local cleuPayload
@@ -35,6 +37,7 @@ function Object:GetFont() return "mock-font", 12, "" end
 function Object:SetPoint(point, _, relativePoint, x, y)
     self.point = { point, relativePoint or point, x or 0, y or 0 }
 end
+function Object:ClearAllPoints() self.point = nil end
 function Object:GetPoint()
     local point = self.point or { "CENTER", "CENTER", 0, 0 }
     return point[1], UIParent, point[2], point[3], point[4]
@@ -61,6 +64,11 @@ function Object:IsShown() return self.shown end
 function Object:SetAlpha(value) self.alpha = value end
 function Object:SetSize(width, height) self.width, self.height = width, height end
 function Object:EnableMouse(value) self.mouseEnabled = value end
+function Object:SetParent(parent) self.parent = parent end
+function Object:GetParent() return self.parent end
+function Object:SetTexture(texture) self.texture = texture end
+function Object:SetTexCoord(...) self.texCoord = { ... } end
+function Object:SetColorTexture(...) self.colorTexture = { ... } end
 function Object:LockHighlight() self.highlighted = true end
 function Object:UnlockHighlight() self.highlighted = false end
 function Object:GetID() return self.id or 77 end
@@ -80,6 +88,18 @@ SOUNDKIT = { RAID_WARNING = 1 }
 C_Timer = {
     After = function(duration, callback)
         timers[#timers + 1] = { due = now + duration, callback = callback, fired = false }
+    end,
+}
+C_NamePlate = {
+    GetNamePlateForUnit = function(unitToken)
+        return nameplates[unitToken]
+    end,
+    GetNamePlates = function()
+        local result = {}
+        for _, namePlate in pairs(nameplates) do
+            result[#result + 1] = namePlate
+        end
+        return result
     end,
 }
 Settings = {
@@ -107,6 +127,7 @@ function UnitExists(unit)
 end
 function UnitGUID(unit)
     if unit == "player" then return playerGUID end
+    if nameplateUnits[unit] then return nameplateUnits[unit].guid end
     return arenaUnits[unit] and arenaUnits[unit].guid or nil
 end
 function UnitClass(unit)
@@ -137,6 +158,7 @@ local files = {
     "Core.lua",
     "Alerts.lua",
     "Arena.lua",
+    "ClassIcon.lua",
     "EnemyOverpower.lua",
     "Drinking.lua",
     "InnerFire.lua",
@@ -262,12 +284,33 @@ local function SetAura(unit, spellName, spellID, applications)
     } or nil
 end
 
+local function SetNameplate(unitToken, guid, useUnitFrameToken)
+    local namePlate = NewObject()
+    namePlate.UnitFrame = NewObject()
+    if useUnitFrameToken then
+        namePlate.namePlateUnitToken = false
+        namePlate.unitToken = false
+        namePlate.UnitFrame.unit = unitToken
+    else
+        namePlate.namePlateUnitToken = unitToken
+    end
+    nameplates[unitToken] = namePlate
+    nameplateUnits[unitToken] = { guid = guid }
+    return namePlate
+end
+
+local function RemoveNameplate(unitToken)
+    nameplates[unitToken] = nil
+    nameplateUnits[unitToken] = nil
+    Fire("NAME_PLATE_UNIT_REMOVED", unitToken)
+end
+
 Fire("ADDON_LOADED", "WeshArenaAlerts")
 Fire("PLAYER_LOGIN")
 
 -- Milestone 0.1 compatibility smoke checks.
 assert(namespace.initialized)
-assert(namespace.version == "0.5.0")
+assert(namespace.version == "0.6.0")
 assert(namespace.Drinking.drinkAuraName == "Drink")
 assert(namespace.Drinking.KNOWN_DRINK_SPELL_IDS[430])
 assert(namespace.Drinking.KNOWN_DRINK_SPELL_IDS[43154])
@@ -300,6 +343,7 @@ assert(printed[#printed] == "WeshArenaAlerts debug: OFF")
 arenaUnits.arena1 = { guid = "Enemy-Warrior-1", className = "Warrior", classFile = "WARRIOR", classID = 1, name = "ArmsOne" }
 arenaUnits.arena2 = { guid = "Enemy-Rogue", className = "Rogue", classFile = "ROGUE", classID = 4, name = "Sneaky" }
 arenaUnits.arena3 = { guid = "Enemy-Warrior-2", className = "Warrior", classFile = "WARRIOR", classID = 1, name = "ArmsTwo" }
+local initialNamePlate = SetNameplate("nameplate1", "Enemy-Warrior-1", true)
 arenaState = true
 namespace.Arena:UpdateArenaState()
 assert(namespace.isInArena)
@@ -307,6 +351,164 @@ assert(namespace.Arena.eventFrame.events.COMBAT_LOG_EVENT_UNFILTERED)
 assert(namespace.Arena.eventFrame.events.UNIT_AURA)
 assert(namespace.Arena.eventFrame.events.UNIT_SPELLCAST_SUCCEEDED)
 assert(namespace.Arena:GetOpponentByGUID("Enemy-Warrior-1").classFile == "WARRIOR")
+
+-- Milestone 0.6: an already-visible mapped arena opponent is resolved during
+-- arena-start refresh and anchored to the actual nameplate UnitFrame.
+local warriorIcon = namespace.ClassIcon.activeByUnit.nameplate1
+assert(warriorIcon and warriorIcon:IsShown())
+assert(warriorIcon.classFile == "WARRIOR" and warriorIcon.guid == "Enemy-Warrior-1")
+assert(warriorIcon.parent == initialNamePlate.UnitFrame)
+assert(warriorIcon.point[1] == "BOTTOM" and warriorIcon.point[2] == "TOP")
+assert(warriorIcon.point[3] == 0 and warriorIcon.point[4] == 4)
+assert(warriorIcon.mouseEnabled == false)
+assert(warriorIcon.icon.texture == namespace.ClassIcon.CLASS_TEXTURE)
+
+-- Every TBC class has usable standard-sheet coordinates, including the local
+-- fallback path when the client global is absent.
+for _, classFile in ipairs({
+    "WARRIOR", "PALADIN", "HUNTER", "ROGUE", "PRIEST",
+    "SHAMAN", "MAGE", "WARLOCK", "DRUID",
+}) do
+    local texture = NewObject()
+    assert(namespace.ClassIcon:SetClassTexture(texture, classFile))
+    assert(texture.texture == namespace.ClassIcon.CLASS_TEXTURE)
+    assert(#texture.texCoord == 4)
+end
+assert(not namespace.ClassIcon:SetClassTexture(NewObject(), "DEATHKNIGHT"))
+
+-- A second mapped class is selected from authoritative arena GUID metadata.
+arenaUnits.arena4 = { guid = "Enemy-Priest", className = "Priest", classFile = "PRIEST", classID = 5, name = "DiscOne" }
+Fire("ARENA_OPPONENT_UPDATE", "arena4", "seen")
+SetNameplate("nameplate2", "Enemy-Priest")
+Fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
+assert(namespace.ClassIcon.activeByUnit.nameplate2.classFile == "PRIEST")
+
+-- Pets, NPCs/totems, friendly players, and unrelated enemies have no arena
+-- GUID match and therefore cannot create a visual.
+for _, guid in ipairs({ "Pet-Enemy", "Creature-Totem", "Player-Friendly", "Player-Unmapped" }) do
+    SetNameplate("nameplate3", guid)
+    Fire("NAME_PLATE_UNIT_ADDED", "nameplate3")
+    assert(not namespace.ClassIcon.activeByUnit.nameplate3)
+end
+
+-- A nameplate can precede arena mapping; the mapping event triggers a one-shot
+-- refresh and resolves it without polling.
+SetNameplate("nameplate3", "Enemy-Late-Priest")
+Fire("NAME_PLATE_UNIT_ADDED", "nameplate3")
+assert(not namespace.ClassIcon.activeByUnit.nameplate3)
+arenaUnits.arena5 = { guid = "Enemy-Late-Priest", className = "Priest", classFile = "PRIEST", classID = 5, name = "LateDisc" }
+Fire("ARENA_OPPONENT_UPDATE", "arena5", "seen")
+assert(namespace.ClassIcon.activeByUnit.nameplate3.classFile == "PRIEST")
+
+-- Reusing the same token for another GUID revalidates and clears stale class
+-- state even if Blizzard emits ADDED before a defensive REMOVED cleanup.
+local priestFrame = namespace.ClassIcon.activeByUnit.nameplate3
+SetNameplate("nameplate3", "Enemy-Warrior-2")
+Fire("NAME_PLATE_UNIT_ADDED", "nameplate3")
+assert(namespace.ClassIcon.activeByUnit.nameplate3.classFile == "WARRIOR")
+assert(namespace.ClassIcon.activeByUnit.nameplate3.guid == "Enemy-Warrior-2")
+assert(not namespace.ClassIcon.activeByGUID["Enemy-Late-Priest"])
+assert(namespace.ClassIcon.activeByUnit.nameplate3 == priestFrame)
+
+-- Removal releases into the bounded pool; acquisition scrubs and replaces all
+-- unit/GUID/class metadata.
+RemoveNameplate("nameplate3")
+assert(not namespace.ClassIcon.activeByUnit.nameplate3)
+assert(priestFrame.isPooled and not priestFrame:IsShown())
+assert(rawget(priestFrame, "guid") == nil and rawget(priestFrame, "classFile") == nil)
+SetNameplate("nameplate4", "Enemy-Rogue")
+Fire("NAME_PLATE_UNIT_ADDED", "nameplate4")
+assert(namespace.ClassIcon.activeByUnit.nameplate4 == priestFrame)
+assert(priestFrame.guid == "Enemy-Rogue" and priestFrame.classFile == "ROGUE")
+assert(priestFrame.icon.texCoord[1] == namespace.ClassIcon.FALLBACK_TCOORDS.ROGUE[1])
+
+-- Size, offsets, and border apply live to existing frames without recreation.
+namespace.db.modules.classIcon.iconSize = 40
+namespace.db.modules.classIcon.offsetX = 13
+namespace.db.modules.classIcon.offsetY = 19
+namespace.db.modules.classIcon.showBorder = false
+namespace.ClassIcon:OnSettingsChanged()
+assert(warriorIcon.width == 40 and warriorIcon.height == 40)
+assert(warriorIcon.point[3] == 13 and warriorIcon.point[4] == 19)
+assert(not warriorIcon.border.top:IsShown())
+namespace.db.modules.classIcon.showBorder = true
+namespace.ClassIcon:OnSettingsChanged()
+assert(warriorIcon.border.top:IsShown())
+
+-- Module/master disable clean immediately, and re-enable in an arena performs
+-- a visible-nameplate refresh without requiring reload.
+namespace.db.modules.classIcon.enabled = false
+namespace.ClassIcon:OnSettingsChanged()
+assert(not next(namespace.ClassIcon.activeByUnit))
+namespace.db.modules.classIcon.enabled = true
+namespace.ClassIcon:OnSettingsChanged()
+assert(namespace.ClassIcon.activeByUnit.nameplate1)
+namespace.db.general.enabled = false
+namespace.ClassIcon:OnSettingsChanged()
+assert(not next(namespace.ClassIcon.activeByUnit))
+namespace.db.general.enabled = true
+namespace.ClassIcon:OnSettingsChanged()
+assert(namespace.ClassIcon.activeByUnit.nameplate1)
+
+-- Missing nameplate APIs and unsafe initial-scan tokens fail closed.
+local savedNamePlateAPI = C_NamePlate
+C_NamePlate = nil
+assert(pcall(function() namespace.ClassIcon:RefreshVisibleNameplates("test") end))
+assert(not next(namespace.ClassIcon.activeByUnit))
+C_NamePlate = savedNamePlateAPI
+local unsafePlate = NewObject()
+nameplates.unsafe = unsafePlate
+assert(pcall(function() namespace.ClassIcon:RefreshVisibleNameplates("test") end))
+nameplates.unsafe = nil
+namespace.ClassIcon:RefreshVisibleNameplates("test")
+assert(namespace.ClassIcon.activeByUnit.nameplate1)
+
+-- The settings preview is independent and never enters runtime associations.
+assert(namespace.Options.classIconPreview.iconFrame:IsShown())
+assert(rawget(namespace.Options.classIconPreview.iconFrame, "classFile") == nil)
+
+-- Debug mode exposes event, match, show, removal, late mapping, and refresh flow.
+namespace.debugEnabled = true
+namespace.db.general.debug = true
+RemoveNameplate("nameplate4")
+SetNameplate("nameplate4", "Enemy-Rogue")
+Fire("NAME_PLATE_UNIT_ADDED", "nameplate4")
+namespace.ClassIcon:RefreshVisibleNameplates("test")
+SetNameplate("nameplate5", "Enemy-Debug-Late")
+Fire("NAME_PLATE_UNIT_ADDED", "nameplate5")
+arenaUnits.arena5 = { guid = "Enemy-Debug-Late", className = "Priest", classFile = "PRIEST", classID = 5, name = "DebugDisc" }
+Fire("ARENA_OPPONENT_UPDATE", "arena5", "seen")
+assert(PrintedContains("ClassIcon NAME_PLATE_UNIT_ADDED: unit=nameplate4 guid=Enemy-Rogue"))
+assert(PrintedContains("ClassIcon matched: nameplate4 -> arena2 -> ROGUE"))
+assert(PrintedContains("ClassIcon shown: unit=nameplate4 class=ROGUE"))
+assert(PrintedContains("ClassIcon removed: unit=nameplate4 guid=Enemy-Rogue"))
+assert(PrintedContains("ClassIcon refresh visible nameplates"))
+assert(PrintedContains("ClassIcon late mapping resolved: nameplate5 -> arena5"))
+RemoveNameplate("nameplate5")
+namespace.debugEnabled = false
+namespace.db.general.debug = false
+
+-- Restore defaults for later regression scenarios.
+namespace.db.modules.classIcon.iconSize = 28
+namespace.db.modules.classIcon.offsetX = 0
+namespace.db.modules.classIcon.offsetY = 4
+namespace.db.modules.classIcon.showBorder = true
+
+-- Arena exit unregisters both nameplate events and clears every runtime visual;
+-- the static Settings preview remains available. Re-entry refreshes visible plates.
+arenaState = false
+namespace.Arena:UpdateArenaState()
+assert(not next(namespace.ClassIcon.activeByUnit))
+assert(not namespace.Arena.eventFrame.events.NAME_PLATE_UNIT_ADDED)
+assert(not namespace.Arena.eventFrame.events.NAME_PLATE_UNIT_REMOVED)
+assert(namespace.Options.classIconPreview.iconFrame:IsShown())
+Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+assert(not next(namespace.ClassIcon.activeByUnit))
+arenaState = true
+namespace.Arena:UpdateArenaState()
+assert(namespace.Arena.eventFrame.events.NAME_PLATE_UNIT_ADDED)
+assert(namespace.Arena.eventFrame.events.NAME_PLATE_UNIT_REMOVED)
+assert(namespace.ClassIcon.activeByUnit.nameplate1)
 
 -- Milestone 0.5: the player aura is the only source of truth for the persistent
 -- Priest Inner Fire OK / LOW / MISSING state machine.

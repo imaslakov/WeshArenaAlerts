@@ -1,14 +1,15 @@
 ## Interface: 20506
 ## Title: WeshArenaAlerts
-## Notes: Arena-only Inner Fire, enemy Scatter Shot, Drinking, and Overpower alerts for TBC Anniversary.
+## Notes: Arena-only alerts and enemy class icons for TBC Anniversary.
 ## Author: Wesh
-## Version: 0.5.0
+## Version: 0.6.0
 ## SavedVariables: WeshArenaAlertsDB
 
 Defaults.lua
 Core.lua
 Alerts.lua
 Arena.lua
+ClassIcon.lua
 EnemyOverpower.lua
 Drinking.lua
 InnerFire.lua
