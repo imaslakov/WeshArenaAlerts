@@ -57,6 +57,9 @@ function Arena:Activate()
     if WAA.InnerFire then
         WAA.InnerFire:OnArenaActivated()
     end
+    if WAA.ShieldAbsorb then
+        WAA.ShieldAbsorb:OnArenaActivated()
+    end
     if WAA.ClassIcon and WAA.ClassIcon.initialized then
         WAA.ClassIcon:OnArenaActivated()
     end
@@ -74,6 +77,9 @@ function Arena:Deactivate()
     end
     if WAA.InnerFire then
         WAA.InnerFire:ClearRuntime()
+    end
+    if WAA.ShieldAbsorb then
+        WAA.ShieldAbsorb:ClearRuntime()
     end
     if WAA.Scatter then
         WAA.Scatter:ClearRuntime()

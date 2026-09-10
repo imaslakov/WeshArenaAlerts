@@ -12,6 +12,7 @@ local nameplateUnits = {}
 local nameplates = {}
 local unitAuras = {}
 local unitAuraCalls = 0
+local totalAbsorb
 local cleuPayload
 local unpackValues = table.unpack or unpack
 
@@ -34,6 +35,7 @@ function Object:SetScript(script, callback) self.scripts[script] = callback end
 function Object:CreateTexture() return NewObject() end
 function Object:CreateFontString() return NewObject() end
 function Object:GetFont() return "mock-font", 12, "" end
+function Object:SetFont(font, size, flags) self.font, self.fontSize, self.fontFlags = font, size, flags end
 function Object:SetPoint(point, _, relativePoint, x, y)
     self.point = { point, relativePoint or point, x or 0, y or 0 }
 end
@@ -42,7 +44,12 @@ function Object:GetPoint()
     local point = self.point or { "CENTER", "CENTER", 0, 0 }
     return point[1], UIParent, point[2], point[3], point[4]
 end
-function Object:SetText(text) self.text = text end
+function Object:SetText(text)
+    if type(text) == "table" and text.failDisplay then
+        error("mock secret display rejected")
+    end
+    self.text = text
+end
 function Object:SetChecked(value) self.checked = value end
 function Object:GetChecked() return self.checked end
 function Object:SetMinMaxValues(minimum, maximum) self.minimum, self.maximum = minimum, maximum end
@@ -141,8 +148,9 @@ function UnitAura(unit, index)
     unitAuraCalls = unitAuraCalls + 1
     local aura = unitAuras[unit] and unitAuras[unit][index]
     if not aura then return nil end
-    return aura.name, nil, aura.applications, nil, nil, nil, nil, nil, nil, aura.spellID
+    return aura.name, aura.texture, aura.applications, nil, nil, nil, nil, nil, nil, aura.spellID
 end
+function UnitGetTotalAbsorbs() return totalAbsorb end
 function IsInInstance() return arenaState, arenaState and "arena" or "none" end
 function CombatLogGetCurrentEventInfo() return unpackValues(cleuPayload) end
 function wipe(target) for key in pairs(target) do target[key] = nil end end
@@ -162,6 +170,7 @@ local files = {
     "EnemyOverpower.lua",
     "Drinking.lua",
     "InnerFire.lua",
+    "ShieldAbsorb.lua",
     "Scatter.lua",
     "Options.lua",
 }
@@ -278,10 +287,33 @@ local function AuraEvent(eventType, destGUID, spellID, spellName)
     }
 end
 
-local function SetAura(unit, spellName, spellID, applications)
+local function SetAura(unit, spellName, spellID, applications, points, texture, auraInstanceID)
     unitAuras[unit] = spellName and {
-        { name = spellName, spellID = spellID, applications = applications },
+        {
+            name = spellName,
+            spellID = spellID,
+            applications = applications,
+            points = points,
+            texture = texture,
+            auraInstanceID = auraInstanceID,
+        },
     } or nil
+end
+
+local function UseModernAuras()
+    C_UnitAuras = {
+        GetAuraDataByIndex = function(unit, index)
+            local aura = unitAuras[unit] and unitAuras[unit][index]
+            if not aura then return nil end
+            return {
+                spellId = aura.spellID,
+                applications = aura.applications,
+                points = aura.points,
+                icon = aura.texture,
+                auraInstanceID = aura.auraInstanceID,
+            }
+        end,
+    }
 end
 
 local function SetNameplate(unitToken, guid, useUnitFrameToken)
@@ -310,7 +342,7 @@ Fire("PLAYER_LOGIN")
 
 -- Milestone 0.1 compatibility smoke checks.
 assert(namespace.initialized)
-assert(namespace.version == "0.6.0")
+assert(namespace.version == "0.7.0")
 assert(namespace.Drinking.drinkAuraName == "Drink")
 assert(namespace.Drinking.KNOWN_DRINK_SPELL_IDS[430])
 assert(namespace.Drinking.KNOWN_DRINK_SPELL_IDS[43154])
@@ -323,6 +355,8 @@ assert(namespace.Scatter.SCATTER_SHOT_SPELL_ID == 19503)
 assert(namespace.Scatter.SCATTER_EVENT_DEDUP_SECONDS == 0.5)
 assert(namespace.InnerFire.INNER_FIRE_SPELL_IDS[588])
 assert(namespace.InnerFire.INNER_FIRE_SPELL_IDS[25431])
+assert(namespace.ShieldAbsorb.POWER_WORD_SHIELD_SPELL_IDS[17])
+assert(namespace.ShieldAbsorb.POWER_WORD_SHIELD_SPELL_IDS[25218])
 assert(namespace.Alerts.frames.scatter.mouseEnabled == false)
 assert(namespace.db.modules.enemyOverpower.showCountdown)
 assert(namespace.Options.category:GetID() == 77)
@@ -349,6 +383,7 @@ namespace.Arena:UpdateArenaState()
 assert(namespace.isInArena)
 assert(namespace.Arena.eventFrame.events.COMBAT_LOG_EVENT_UNFILTERED)
 assert(namespace.Arena.eventFrame.events.UNIT_AURA)
+assert(namespace.Arena.eventFrame.events.UNIT_ABSORB_AMOUNT_CHANGED)
 assert(namespace.Arena.eventFrame.events.UNIT_SPELLCAST_SUCCEEDED)
 assert(namespace.Arena:GetOpponentByGUID("Enemy-Warrior-1").classFile == "WARRIOR")
 
@@ -711,6 +746,247 @@ local previewState, previewCharges = namespace.InnerFire.state, namespace.InnerF
 namespace.Alerts:ShowInnerFirePreview()
 assert(namespace.Alerts.frames.innerFire:IsShown())
 assert(namespace.InnerFire.state == previewState and namespace.InnerFire.charges == previewCharges)
+
+-- Milestone 0.7: self Power Word: Shield remaining absorb. AuraData is
+-- authoritative, UnitGetTotalAbsorbs is used only after a canonical aura match.
+UseModernAuras()
+totalAbsorb = nil
+SetAura("player")
+namespace.ShieldAbsorb:ScanPlayer("initial scan")
+assert(namespace.ShieldAbsorb.state == namespace.ShieldAbsorb.STATE_ABSENT)
+assert(not namespace.Alerts.frames.shieldAbsorb:IsShown())
+
+SetAura("player", "Power Word: Shield", 25218, nil, { 1847 }, "PWSTexture", 101)
+Fire("UNIT_AURA", "player")
+assert(namespace.ShieldAbsorb.state == namespace.ShieldAbsorb.STATE_KNOWN)
+assert(namespace.ShieldAbsorb.amount == 1847)
+assert(namespace.ShieldAbsorb.amountSource == namespace.ShieldAbsorb.SOURCE_AURA_POINTS)
+assert(namespace.ShieldAbsorb.spellID == 25218 and namespace.ShieldAbsorb.auraInstanceID == 101)
+assert(namespace.Alerts.frames.shieldAbsorb:IsShown())
+assert(namespace.Alerts.frames.shieldAbsorb.value.text == "1847")
+assert(namespace.Alerts.frames.shieldAbsorb.icon.texture == "PWSTexture")
+
+local shieldFrame = namespace.Alerts.frames.shieldAbsorb
+local shieldShowCount = shieldFrame.showCount
+SetAura("player", "Power Word: Shield", 25218, nil, { 1320 }, "PWSTexture", 101)
+Fire("UNIT_ABSORB_AMOUNT_CHANGED", "player")
+assert(namespace.ShieldAbsorb.amount == 1320 and shieldFrame.value.text == "1320")
+assert(shieldFrame.showCount == shieldShowCount)
+SetAura("player", "Power Word: Shield", 25218, nil, { 215 }, "PWSTexture", 101)
+Fire("UNIT_ABSORB_AMOUNT_CHANGED", "player")
+assert(namespace.ShieldAbsorb.amount == 215 and shieldFrame.value.text == "215")
+assert(shieldFrame.showCount == shieldShowCount)
+
+-- Removal and dispel both converge on the aura-absent transition. A recast uses
+-- the new API value and aura instance rather than a reconstructed maximum.
+SetAura("player")
+Fire("UNIT_AURA", "player")
+assert(namespace.ShieldAbsorb.state == namespace.ShieldAbsorb.STATE_ABSENT)
+assert(namespace.ShieldAbsorb.amount == nil and namespace.ShieldAbsorb.amountSource == nil)
+assert(not shieldFrame:IsShown())
+SetAura("player", "Power Word: Shield", 10901, nil, { 900 }, nil, 201)
+Fire("UNIT_AURA", "player")
+SetAura("player")
+Fire("UNIT_AURA", "player")
+assert(namespace.ShieldAbsorb.state == namespace.ShieldAbsorb.STATE_ABSENT and not shieldFrame:IsShown())
+SetAura("player", "Power Word: Shield", 25218, nil, { 1900 }, nil, 202)
+Fire("UNIT_AURA", "player")
+assert(namespace.ShieldAbsorb.amount == 1900 and namespace.ShieldAbsorb.auraInstanceID == 202)
+
+-- Every canonical TBC player rank is accepted, while unrelated or noncanonical
+-- spell IDs cannot activate the frame.
+for _, spellID in ipairs({ 17, 592, 600, 3747, 6065, 6066, 10898, 10899, 10900, 10901, 25217, 25218 }) do
+    SetAura("player", "Power Word: Shield", spellID, nil, { spellID })
+    Fire("UNIT_AURA", "player")
+    assert(namespace.ShieldAbsorb.state == namespace.ShieldAbsorb.STATE_KNOWN)
+    assert(namespace.ShieldAbsorb.spellID == spellID and namespace.ShieldAbsorb.amount == spellID)
+end
+SetAura("player", "Unrelated Priest Buff", 12345, nil, { 777 })
+Fire("UNIT_AURA", "player")
+assert(namespace.ShieldAbsorb.state == namespace.ShieldAbsorb.STATE_ABSENT and not shieldFrame:IsShown())
+SetAura("player", "NPC Shield", 999999, nil, { 888 })
+Fire("UNIT_AURA", "player")
+assert(namespace.ShieldAbsorb.state == namespace.ShieldAbsorb.STATE_ABSENT and not shieldFrame:IsShown())
+
+-- Specific aura points win over a larger total. The total fallback is permitted
+-- only while PW:S itself is confirmed present.
+totalAbsorb = 1500
+SetAura("player", "Power Word: Shield", 25218, nil, { 1000 })
+Fire("UNIT_AURA", "player")
+assert(namespace.ShieldAbsorb.amount == 1000)
+assert(namespace.ShieldAbsorb.amountSource == namespace.ShieldAbsorb.SOURCE_AURA_POINTS)
+SetAura("player", "Power Word: Shield", 25218, nil, nil)
+Fire("UNIT_AURA", "player")
+assert(namespace.ShieldAbsorb.amount == 1500)
+assert(namespace.ShieldAbsorb.amountSource == namespace.ShieldAbsorb.SOURCE_TOTAL_ABSORB)
+
+-- Legacy UnitAura still confirms the canonical aura, with the unit total as its
+-- only available amount source because the legacy tuple has no points payload.
+C_UnitAuras = nil
+unitAuraCalls = 0
+totalAbsorb = 444
+SetAura("player", "Power Word: Shield", 592, nil, nil, "LegacyPWSTexture")
+Fire("UNIT_AURA", "player")
+assert(unitAuraCalls > 0)
+assert(namespace.ShieldAbsorb.state == namespace.ShieldAbsorb.STATE_KNOWN)
+assert(namespace.ShieldAbsorb.amount == 444)
+assert(namespace.ShieldAbsorb.amountSource == namespace.ShieldAbsorb.SOURCE_TOTAL_ABSORB)
+assert(shieldFrame.icon.texture == "LegacyPWSTexture")
+UseModernAuras()
+totalAbsorb = 1500
+SetAura("player", "Other Absorb", 12345, nil, nil)
+Fire("UNIT_AURA", "player")
+assert(namespace.ShieldAbsorb.state == namespace.ShieldAbsorb.STATE_ABSENT and not shieldFrame:IsShown())
+
+-- Missing/restricted sources are explicit UNKNOWN and always replace stale text.
+totalAbsorb = nil
+SetAura("player", "Power Word: Shield", 25218, nil, { 700 })
+Fire("UNIT_AURA", "player")
+assert(namespace.ShieldAbsorb.state == namespace.ShieldAbsorb.STATE_KNOWN)
+SetAura("player", "Power Word: Shield", 25218, nil, nil)
+Fire("UNIT_ABSORB_AMOUNT_CHANGED", "player")
+assert(namespace.ShieldAbsorb.state == namespace.ShieldAbsorb.STATE_UNKNOWN)
+assert(namespace.ShieldAbsorb.amount == nil)
+assert(shieldFrame:IsShown() and shieldFrame.value.text == "?")
+
+-- Normal number formatting is live, and visual settings update the existing frame.
+SetAura("player", "Power Word: Shield", 25218, nil, { 1847 })
+Fire("UNIT_AURA", "player")
+namespace.db.modules.shieldAbsorb.numberFormat = "SHORT"
+namespace.ShieldAbsorb:OnSettingsChanged()
+assert(shieldFrame.value.text == "1.8k")
+SetAura("player", "Power Word: Shield", 25218, nil, { 963 })
+Fire("UNIT_ABSORB_AMOUNT_CHANGED", "player")
+assert(shieldFrame.value.text == "963")
+namespace.db.modules.shieldAbsorb.numberFormat = "EXACT"
+namespace.db.modules.shieldAbsorb.iconSize = 96
+namespace.db.modules.shieldAbsorb.textSize = 34
+namespace.ShieldAbsorb:OnSettingsChanged()
+assert(shieldFrame.value.text == "963")
+assert(shieldFrame.icon.width == 96, "shield icon width=" .. tostring(shieldFrame.icon.width))
+assert(shieldFrame.value.fontSize == 34)
+
+-- A mocked secret fallback never reaches the arithmetic formatter. Supported
+-- direct FontString display retains KNOWN; a rejected direct display becomes UNKNOWN.
+local secretValue = { secret = true }
+namespace.ShieldAbsorb.secretValueDetector = function(value)
+    return type(value) == "table" and value.secret == true
+end
+local originalShortFormatter = namespace.Alerts.FormatShortNumber
+local shortFormatterCalls = 0
+namespace.Alerts.FormatShortNumber = function(self, value)
+    shortFormatterCalls = shortFormatterCalls + 1
+    return originalShortFormatter(self, value)
+end
+namespace.db.modules.shieldAbsorb.numberFormat = "SHORT"
+totalAbsorb = secretValue
+SetAura("player", "Power Word: Shield", 25218, nil, nil)
+Fire("UNIT_ABSORB_AMOUNT_CHANGED", "player")
+assert(namespace.ShieldAbsorb.state == namespace.ShieldAbsorb.STATE_KNOWN)
+assert(namespace.ShieldAbsorb.amountSource == namespace.ShieldAbsorb.SOURCE_TOTAL_ABSORB)
+assert(namespace.ShieldAbsorb.amount == secretValue and namespace.ShieldAbsorb.amountIsSecret)
+assert(shieldFrame.value.text == secretValue and shortFormatterCalls == 0)
+
+local rejectedSecretValue = { secret = true, failDisplay = true }
+totalAbsorb = rejectedSecretValue
+Fire("UNIT_ABSORB_AMOUNT_CHANGED", "player")
+assert(namespace.ShieldAbsorb.state == namespace.ShieldAbsorb.STATE_UNKNOWN)
+assert(namespace.ShieldAbsorb.amount == nil and shieldFrame.value.text == "?")
+assert(shortFormatterCalls == 0)
+namespace.Alerts.FormatShortNumber = originalShortFormatter
+namespace.ShieldAbsorb.secretValueDetector = nil
+namespace.db.modules.shieldAbsorb.numberFormat = "EXACT"
+totalAbsorb = nil
+
+-- Preview data is isolated from runtime data. Its timer restores a newer runtime
+-- snapshot and cannot hide it; a runtime removal does not end the preview early.
+SetAura("player", "Power Word: Shield", 25218, nil, { 900 })
+Fire("UNIT_AURA", "player")
+local runtimeState, runtimeAmount = namespace.ShieldAbsorb.state, namespace.ShieldAbsorb.amount
+now = 1100
+namespace.Alerts:ShowShieldPreview()
+assert(shieldFrame.value.text == "1847")
+assert(namespace.ShieldAbsorb.state == runtimeState and namespace.ShieldAbsorb.amount == runtimeAmount)
+SetAura("player", "Power Word: Shield", 25218, nil, { 800 })
+Fire("UNIT_ABSORB_AMOUNT_CHANGED", "player")
+assert(shieldFrame.value.text == "1847" and namespace.ShieldAbsorb.amount == 800)
+RunTimersThrough(1104)
+assert(shieldFrame:IsShown() and shieldFrame.value.text == "800")
+now = 1110
+namespace.Alerts:ShowShieldPreview()
+SetAura("player")
+Fire("UNIT_AURA", "player")
+assert(shieldFrame:IsShown() and shieldFrame.value.text == "1847")
+RunTimersThrough(1114)
+assert(not shieldFrame:IsShown())
+
+-- Module/master/class/arena lifecycle gates automatic work and one-shot scans
+-- restore an already-active PW:S after re-enable or reload-style initialization.
+SetAura("player", "Power Word: Shield", 25218, nil, { 777 })
+namespace.db.modules.shieldAbsorb.enabled = false
+namespace.ShieldAbsorb:OnSettingsChanged()
+assert(namespace.ShieldAbsorb.state == nil and not shieldFrame:IsShown())
+namespace.db.modules.shieldAbsorb.enabled = true
+namespace.ShieldAbsorb:OnSettingsChanged()
+assert(namespace.ShieldAbsorb.state == namespace.ShieldAbsorb.STATE_KNOWN and namespace.ShieldAbsorb.amount == 777)
+namespace.db.general.enabled = false
+namespace.ShieldAbsorb:OnSettingsChanged()
+assert(namespace.ShieldAbsorb.state == nil and not shieldFrame:IsShown())
+namespace.db.general.enabled = true
+namespace.ShieldAbsorb:OnSettingsChanged()
+assert(namespace.ShieldAbsorb.amount == 777)
+playerClassFile = "MAGE"
+namespace.ShieldAbsorb:OnSettingsChanged()
+assert(namespace.ShieldAbsorb.state == nil and not shieldFrame:IsShown())
+playerClassFile = "PRIEST"
+namespace.ShieldAbsorb:OnSettingsChanged()
+assert(namespace.ShieldAbsorb.amount == 777)
+arenaState = false
+namespace.Arena:UpdateArenaState()
+assert(namespace.ShieldAbsorb.state == nil and not shieldFrame:IsShown())
+assert(not namespace.Arena.eventFrame.events.UNIT_ABSORB_AMOUNT_CHANGED)
+namespace.Alerts:ShowShieldPreview()
+assert(shieldFrame:IsShown() and namespace.ShieldAbsorb.state == nil)
+namespace.Alerts:CancelHide("shieldAbsorb")
+shieldFrame:Hide()
+namespace.Alerts.shieldDisplayMode = nil
+arenaState = true
+namespace.Arena:UpdateArenaState()
+assert(namespace.Arena.eventFrame.events.UNIT_ABSORB_AMOUNT_CHANGED)
+assert(namespace.ShieldAbsorb.amount == 777 and shieldFrame:IsShown())
+namespace.ShieldAbsorb:ClearRuntime()
+namespace.ShieldAbsorb:ScanPlayer("initial scan")
+assert(namespace.ShieldAbsorb.amount == 777 and shieldFrame:IsShown())
+
+-- Debug output identifies events, source selection, changes, removal, secrets,
+-- unavailable amounts, and state transitions without stringifying secret data.
+namespace.debugEnabled = true
+namespace.db.general.debug = true
+namespace.ShieldAbsorb:ClearRuntime()
+SetAura("player", "Power Word: Shield", 25218, nil, { 1847 })
+namespace.ShieldAbsorb:ScanPlayer("initial scan")
+SetAura("player", "Power Word: Shield", 25218, nil, { 1320 })
+Fire("UNIT_ABSORB_AMOUNT_CHANGED", "player")
+totalAbsorb = 1200
+SetAura("player", "Power Word: Shield", 25218, nil, nil)
+Fire("UNIT_AURA", "player")
+totalAbsorb = nil
+Fire("UNIT_ABSORB_AMOUNT_CHANGED", "player")
+SetAura("player")
+Fire("UNIT_AURA", "player")
+assert(PrintedContains("Shield initial scan"))
+assert(PrintedContains("PW:S found: spellID=25218"))
+assert(PrintedContains("Shield amount source=AURA_POINTS amount=1847"))
+assert(PrintedContains("UNIT_ABSORB_AMOUNT_CHANGED: player"))
+assert(PrintedContains("Shield amount changed: 1847 -> 1320 source=AURA_POINTS"))
+assert(PrintedContains("Shield fallback source=TOTAL_ABSORB"))
+assert(PrintedContains("Shield amount unavailable"))
+assert(PrintedContains("Shield state: KNOWN -> UNKNOWN"))
+assert(PrintedContains("Power Word: Shield removed"))
+namespace.debugEnabled = false
+namespace.db.general.debug = false
+totalAbsorb = nil
+C_UnitAuras = nil
 
 -- Milestone 0.4: a mapped enemy Hunter's successful Scatter cast flashes
 -- immediately from UNIT_SPELLCAST_SUCCEEDED without any destination or aura.

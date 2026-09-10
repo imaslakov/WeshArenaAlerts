@@ -8,6 +8,16 @@ WeshArenaAlerts is an arena-focused alert addon for **World of Warcraft: The Bur
 2. Confirm that **WeshArenaAlerts** is enabled on the character-selection AddOns screen.
 3. Open the settings with `Esc -> Options -> AddOns -> WeshArenaAlerts` or `/waa`.
 
+## Milestone 0.7
+
+Version 0.7.0 adds **Self Power Word: Shield Remaining Absorb**. The automatic module runs only in arenas and only for the addon owner when `UnitClass("player")` reports `PRIEST`. It recognizes every normal TBC player rank (`17`, `592`, `600`, `3747`, `6065`, `6066`, `10898`, `10899`, `10900`, `10901`, `25217`, and `25218`) and never activates for a teammate, enemy, unrelated buff, or noncanonical shield spell.
+
+The state machine is `ABSENT` (no self PW:S, frame hidden), `KNOWN` (PW:S present with an available remaining amount), and `UNKNOWN` (PW:S present but no safely usable amount, displayed as `?`). `UNIT_AURA("player")` handles apply, recast, dispel, and removal; `UNIT_ABSORB_AMOUNT_CHANGED("player")` rereads the source after damage. Arena start, `/reload` in an arena, and enabling the addon or module perform one initial scan. Arena exit and disabling either switch immediately clear state and hide the existing Shield Absorb frame. There is no polling, `OnUpdate`, tooltip parsing, combat-log reconstruction, or calculated maximum-shield formula.
+
+The preferred source is `AuraData.points[1]` from a canonical PW:S aura returned by `C_UnitAuras.GetAuraDataByIndex`; legacy `UnitAura` remains the aura-detection fallback. `UnitGetTotalAbsorbs("player")` is consulted only after PW:S itself has been confirmed and only when the aura-specific amount is unavailable. This total fallback is explicitly lower confidence and can include other simultaneous absorb effects; the addon does not attempt to subtract unknown absorbs. If PW:S is absent, a positive total absorb from another effect never shows the frame.
+
+Restricted PvP values are feature-detected through Blizzard's secret-value helpers. A secret amount bypasses comparisons, arithmetic, `math.floor`, short-number formatting, and debug string conversion. The addon first attempts to pass it directly to the Shield FontString; if the client rejects that operation, it safely changes to `UNKNOWN` and displays `?`. For accessible numbers, Exact and Short (`1847` → `1.8k`) formats, icon size, and text size update live. Manual Preview remains available outside arenas and for non-Priests, and its timer cannot overwrite or hide a newer runtime state.
+
 ## Milestone 0.6
 
 Version 0.6.0 adds **Enemy Class Icon over Nameplate**. While the arena runtime is active, a large class icon is anchored above each currently visible Blizzard nameplate whose unit GUID matches one of the mapped `arena1` through `arena5` opponent GUIDs. The match is authoritative and GUID-based: pets, totems, guardians, NPCs, friendly players, and unrelated enemy players do not receive icons.
@@ -48,8 +58,8 @@ The **Enemy Drinking** detector from Milestone 0.3 remains available. While the 
 
 Drink recognition primarily compares the aura name with the client's localized canonical Drink spell name. A small, non-exhaustive set of known TBC Drink spell IDs is used only as a fallback, so detection is not tied to one rank or type of water. Multiple enemy GUIDs can be tracked simultaneously, and arena exit, opponent removal, or disabling the module clears runtime state.
 
-The **Enemy Overpower Opportunity** module from Milestone 0.2 remains available with its 5-second reconstructed opportunity window. Power Word: Shield absorb remains a manual-preview-only module.
+The **Enemy Overpower Opportunity** module from Milestone 0.2 remains available with its 5-second reconstructed opportunity window.
 
 Use `/waa debug` to toggle internal arena mapping and combat-log diagnostics before a test. Plain `/waa` continues to open Settings.
 
-**Milestones 0.1-0.6 still require real validation in the TBC Anniversary 2.5.6 client.** In particular, an arena test must confirm the live Inner Fire aura payload (`applications`/legacy `count`) for every rank; whether `UNIT_SPELLCAST_SUCCEEDED` is exposed for enemy arena units and arrives before `SPELL_CAST_SUCCESS`; the Anniversary nameplate token fields and `C_NamePlate` behavior during arena start and `/reload`; the icon anchor height on stock nameplates; and practical compatibility with third-party nameplate addons.
+**Milestones 0.1-0.7 require real validation in the TBC Anniversary 2.5.6 client.** In particular, an arena test must confirm which `AuraData.points` index contains the live Power Word: Shield remaining absorb, whether that value updates on every hit, whether `UNIT_ABSORB_AMOUNT_CHANGED("player")` fires during an active match, whether the amount becomes secret in restricted PvP, whether a FontString accepts that secret value directly, and how the total fallback behaves with multiple simultaneous absorbs. Existing validation also remains for the live Inner Fire aura payload (`applications`/legacy `count`), enemy `UNIT_SPELLCAST_SUCCEEDED`, Anniversary nameplate tokens and `C_NamePlate`, stock-nameplate anchor height, and third-party nameplate compatibility.

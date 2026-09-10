@@ -2,7 +2,7 @@
 ## Title: WeshArenaAlerts
 ## Notes: Arena-only alerts and enemy class icons for TBC Anniversary.
 ## Author: Wesh
-## Version: 0.6.0
+## Version: 0.7.0
 ## SavedVariables: WeshArenaAlertsDB
 
 Defaults.lua
@@ -13,5 +13,6 @@ ClassIcon.lua
 EnemyOverpower.lua
 Drinking.lua
 InnerFire.lua
+ShieldAbsorb.lua
 Scatter.lua
 Options.lua

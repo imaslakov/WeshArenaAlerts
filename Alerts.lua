@@ -82,6 +82,8 @@ function Alerts:Initialize()
     self.drinkingRuntimeActive = false
     self.innerFireDisplayMode = nil
     self.innerFireRuntimeActive = false
+    self.shieldDisplayMode = nil
+    self.shieldRuntimeActive = false
     self.overpowerDisplayMode = nil
     self.overpowerRuntimeActive = false
     self.overpowerUpdateElapsed = 0
@@ -264,12 +266,16 @@ function Alerts:LockFrames()
     end
     self.drinkingDisplayMode = nil
     self.innerFireDisplayMode = nil
+    self.shieldDisplayMode = nil
     self.overpowerDisplayMode = nil
     if WAA.EnemyOverpower then
         WAA.EnemyOverpower:RefreshVisual(false)
     end
     if WAA.InnerFire then
         WAA.InnerFire:RefreshVisual()
+    end
+    if WAA.ShieldAbsorb then
+        WAA.ShieldAbsorb:RefreshVisual()
     end
 end
 
@@ -476,19 +482,97 @@ function Alerts:HideInnerFireRuntime()
     self.innerFireDisplayMode = nil
 end
 
-function Alerts:ShowShieldPreview(persistent)
+function Alerts:FormatShortNumber(value)
+    return FormatShortNumber(value)
+end
+
+function Alerts:TrySetShieldValue(value, isSecret)
+    local frame = self.frames.shieldAbsorb
+    if isSecret then
+        local ok = pcall(function()
+            frame.value:SetText(value)
+        end)
+        return ok
+    end
+
+    local text = "?"
+    if value ~= nil then
+        if WAA.db.modules.shieldAbsorb.numberFormat == "SHORT" then
+            text = self:FormatShortNumber(value)
+        else
+            text = tostring(value)
+        end
+    end
+    frame.value:SetText(text)
+    return true
+end
+
+function Alerts:ApplyShieldSettings(value, isSecret, texture)
     local settings = WAA.db.modules.shieldAbsorb
     local frame = self.frames.shieldAbsorb
     frame:SetSize(settings.iconSize + 86, settings.iconSize + 36)
     frame.icon:SetSize(settings.iconSize, settings.iconSize)
+    frame.icon:SetTexture(texture or GetSpellIcon(SPELLS.shieldAbsorb, FALLBACK_ICONS.shieldAbsorb))
     SetFontSize(frame.value, settings.textSize)
-    frame.value:SetText(settings.numberFormat == "SHORT" and FormatShortNumber(1847) or "1847")
+    return self:TrySetShieldValue(value, isSecret)
+end
+
+function Alerts:ShowShieldPreview(persistent)
+    local frame = self.frames.shieldAbsorb
+    local token = self:CancelHide("shieldAbsorb")
+    self.shieldDisplayMode = "preview"
+    self:ApplyShieldSettings(1847, false)
     frame:Show()
     if persistent then
-        self:CancelHide("shieldAbsorb")
-    else
-        self:ScheduleHide("shieldAbsorb", 4)
+        return
     end
+
+    C_Timer.After(4, function()
+        if self.hideTokens.shieldAbsorb ~= token or self.shieldDisplayMode ~= "preview" then
+            return
+        end
+        self.shieldDisplayMode = nil
+        if self.shieldRuntimeActive and WAA.ShieldAbsorb then
+            WAA.ShieldAbsorb:RefreshVisual()
+        elseif not self.positioningMode then
+            frame:Hide()
+        end
+    end)
+end
+
+function Alerts:RefreshShieldPreview()
+    if self.shieldDisplayMode == "preview" then
+        self:ApplyShieldSettings(1847, false)
+    end
+end
+
+function Alerts:ShowShieldRuntime(value, isSecret, texture)
+    self.shieldRuntimeActive = true
+    if self.positioningMode or self.shieldDisplayMode == "preview" then
+        return true
+    end
+
+    local frame = self.frames.shieldAbsorb
+    self:CancelHide("shieldAbsorb")
+    self.shieldDisplayMode = "runtime"
+    local displayed = self:ApplyShieldSettings(value, isSecret, texture)
+    if not displayed then
+        return false
+    end
+    if not frame:IsShown() then
+        frame:Show()
+    end
+    return true
+end
+
+function Alerts:HideShieldRuntime()
+    self.shieldRuntimeActive = false
+    if self.shieldDisplayMode ~= "runtime" then
+        return
+    end
+    self:CancelHide("shieldAbsorb")
+    self.frames.shieldAbsorb:Hide()
+    self.shieldDisplayMode = nil
 end
 
 function Alerts:ApplyOverpowerSettings()
@@ -622,6 +706,8 @@ function Alerts:ClearRuntime()
     self.drinkingDisplayMode = nil
     self.innerFireRuntimeActive = false
     self.innerFireDisplayMode = nil
+    self.shieldRuntimeActive = false
+    self.shieldDisplayMode = nil
     self.overpowerRuntimeActive = false
     self.overpowerDisplayMode = nil
     self.scatterDisplayMode = nil

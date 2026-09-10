@@ -246,6 +246,9 @@ function Options:BuildGeneralPage()
         if WAA.InnerFire then
             WAA.InnerFire:OnSettingsChanged()
         end
+        if WAA.ShieldAbsorb then
+            WAA.ShieldAbsorb:OnSettingsChanged()
+        end
         if WAA.EnemyOverpower then
             WAA.EnemyOverpower:OnSettingsChanged()
         end
@@ -427,15 +430,22 @@ function Options:BuildInnerFirePage()
 end
 
 function Options:BuildShieldPage()
-    local page = self:CreatePage("shieldAbsorb", "Shield Absorb", "Preview of remaining Power Word: Shield absorb on the player.")
+    local page = self:CreatePage("shieldAbsorb", "Shield Absorb", "Shows the remaining absorb of your active Power Word: Shield while playing a Priest in an arena.")
     local db = function() return WAA.db.modules.shieldAbsorb end
-    self:CreateCheckbox(page, "Enabled", function() return db().enabled end, function(v) db().enabled = v end, -92)
+    self:CreateCheckbox(page, "Enabled", function() return db().enabled end, function(v)
+        db().enabled = v
+        WAA.ShieldAbsorb:OnSettingsChanged()
+    end, -92)
     self:CreateSlider(page, "Icon size", 32, 128, 2, 0, function() return db().iconSize end, function(v)
         db().iconSize = v
+        WAA.ShieldAbsorb:OnSettingsChanged()
+        WAA.Alerts:RefreshShieldPreview()
         self:RefreshPositioningPreview("shieldAbsorb")
     end, -148)
     self:CreateSlider(page, "Text size", 16, 48, 1, 0, function() return db().textSize end, function(v)
         db().textSize = v
+        WAA.ShieldAbsorb:OnSettingsChanged()
+        WAA.Alerts:RefreshShieldPreview()
         self:RefreshPositioningPreview("shieldAbsorb")
     end, -221)
     self:CreateChoice(page, "Number format", {
@@ -443,6 +453,8 @@ function Options:BuildShieldPage()
         { label = "Short (1.8k)", value = "SHORT" },
     }, function() return db().numberFormat end, function(v)
         db().numberFormat = v
+        WAA.ShieldAbsorb:OnSettingsChanged()
+        WAA.Alerts:RefreshShieldPreview()
         self:RefreshPositioningPreview("shieldAbsorb")
     end, -294)
     self:CreateTestArea(page, function() WAA.Alerts:ShowShieldPreview() end, -381)
