@@ -80,6 +80,8 @@ function Alerts:Initialize()
     self.frames = {}
     self.hideTokens = {}
     self.positioningMode = false
+    self.drinkingDisplayMode = nil
+    self.drinkingRuntimeActive = false
     self.overpowerDisplayMode = nil
     self.overpowerRuntimeActive = false
     self.overpowerUpdateElapsed = 0
@@ -245,6 +247,7 @@ function Alerts:LockFrames()
         self:SetPositioningStyle(frame, false)
         frame:Hide()
     end
+    self.drinkingDisplayMode = nil
     self.overpowerDisplayMode = nil
     if WAA.EnemyOverpower then
         WAA.EnemyOverpower:RefreshVisual(false)
@@ -276,16 +279,64 @@ end
 function Alerts:ShowDrinkingPreview(persistent, silent)
     local settings = WAA.db.modules.drinking
     local frame = self.frames.drinking
+    local token = self:CancelHide("drinking")
+    self.drinkingDisplayMode = "preview"
     SetFontSize(frame.text, settings.textSize)
     frame:Show()
     if settings.playSound and not silent then
         PlayAlertSound()
     end
     if persistent then
-        self:CancelHide("drinking")
-    else
-        self:ScheduleHide("drinking", settings.duration)
+        return
     end
+
+    C_Timer.After(settings.duration, function()
+        if self.hideTokens.drinking ~= token or self.drinkingDisplayMode ~= "preview" then
+            return
+        end
+        self.drinkingDisplayMode = nil
+        if not self.positioningMode then
+            frame:Hide()
+        end
+    end)
+end
+
+function Alerts:ShowDrinkingRuntime(playSound)
+    local settings = WAA.db.modules.drinking
+    self.drinkingRuntimeActive = true
+
+    if playSound and settings.playSound then
+        PlayAlertSound()
+    end
+    if self.positioningMode or self.drinkingDisplayMode == "preview" then
+        return
+    end
+
+    local frame = self.frames.drinking
+    local token = self:CancelHide("drinking")
+    self.drinkingDisplayMode = "runtime"
+    SetFontSize(frame.text, settings.textSize)
+    frame:Show()
+
+    C_Timer.After(settings.duration, function()
+        if self.hideTokens.drinking ~= token or self.drinkingDisplayMode ~= "runtime" then
+            return
+        end
+        self.drinkingDisplayMode = nil
+        if not self.positioningMode then
+            frame:Hide()
+        end
+    end)
+end
+
+function Alerts:HideDrinkingRuntime()
+    self.drinkingRuntimeActive = false
+    if self.drinkingDisplayMode ~= "runtime" then
+        return
+    end
+    self:CancelHide("drinking")
+    self.frames.drinking:Hide()
+    self.drinkingDisplayMode = nil
 end
 
 function Alerts:ShowScatterPreview()
@@ -459,6 +510,8 @@ function Alerts:ClearRuntime()
     self.positioningMode = false
     WAA.isUnlocked = false
     self:HideAll()
+    self.drinkingRuntimeActive = false
+    self.drinkingDisplayMode = nil
     self.overpowerRuntimeActive = false
     self.overpowerDisplayMode = nil
     for _, key in ipairs(POSITION_KEYS) do

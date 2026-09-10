@@ -63,6 +63,9 @@ function Arena:Deactivate()
     if WAA.EnemyOverpower then
         WAA.EnemyOverpower:ClearRuntime()
     end
+    if WAA.Drinking then
+        WAA.Drinking:ClearRuntime()
+    end
     self:ClearOpponentData()
     WAA.Alerts:ClearRuntime()
     WAA:Debug("Arena runtime deactivated")
@@ -85,6 +88,9 @@ function Arena:UpdateOpponent(unitToken, updateType)
         self.opponentsByGUID[old.guid] = nil
         if WAA.EnemyOverpower then
             WAA.EnemyOverpower:RemoveOpponent(old.guid)
+        end
+        if WAA.Drinking then
+            WAA.Drinking:RemoveOpponent(old.guid, "opponent removed")
         end
     end
 
@@ -111,6 +117,9 @@ function Arena:UpdateOpponent(unitToken, updateType)
         classFile or "UNKNOWN",
         metadata.name or "UNKNOWN"
     )
+    if WAA.Drinking then
+        WAA.Drinking:OnOpponentMapped(unitToken)
+    end
 end
 
 function Arena:RefreshOpponents()

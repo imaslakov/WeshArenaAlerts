@@ -7,6 +7,7 @@ local openedSettings = 0
 local printed = {}
 local playerGUID = "Player-Self"
 local arenaUnits = {}
+local unitAuras = {}
 local cleuPayload
 local unpackValues = table.unpack or unpack
 
@@ -87,8 +88,15 @@ Settings = {
 }
 
 function GetSpellTexture() return nil end
+function GetSpellInfo(spellID)
+    if spellID == 46755 then return "Drink", nil, nil, nil, nil, nil, spellID end
+    return nil
+end
 function PlaySound() soundCount = soundCount + 1 end
 function GetTime() return now end
+function UnitExists(unit)
+    return unit == "player" or arenaUnits[unit] ~= nil
+end
 function UnitGUID(unit)
     if unit == "player" then return playerGUID end
     return arenaUnits[unit] and arenaUnits[unit].guid or nil
@@ -99,6 +107,11 @@ function UnitClass(unit)
     return opponent.className, opponent.classFile, opponent.classID
 end
 function UnitName(unit) return arenaUnits[unit] and arenaUnits[unit].name or nil end
+function UnitAura(unit, index)
+    local aura = unitAuras[unit] and unitAuras[unit][index]
+    if not aura then return nil end
+    return aura.name, nil, nil, nil, nil, nil, nil, nil, nil, aura.spellID
+end
 function IsInInstance() return arenaState, arenaState and "arena" or "none" end
 function CombatLogGetCurrentEventInfo() return unpackValues(cleuPayload) end
 function wipe(target) for key in pairs(target) do target[key] = nil end end
@@ -115,6 +128,7 @@ local files = {
     "Alerts.lua",
     "Arena.lua",
     "EnemyOverpower.lua",
+    "Drinking.lua",
     "Options.lua",
 }
 for _, file in ipairs(files) do
@@ -166,6 +180,15 @@ local function ResetRuntime()
     namespace.EnemyOverpower:ClearRuntime()
 end
 
+local function ResetDrinking()
+    namespace.db.general.enabled = true
+    namespace.db.modules.drinking.enabled = true
+    namespace.db.modules.drinking.playSound = true
+    namespace.db.modules.drinking.duration = 3.0
+    namespace.Drinking:ClearRuntime()
+    unitAuras = {}
+end
+
 local function MissEvent(eventType, sourceGUID, destGUID, missType, spellID)
     return {
         eventType = eventType,
@@ -185,12 +208,28 @@ local function SpellEvent(eventType, sourceGUID, destGUID, spellID)
     }
 end
 
+local function AuraEvent(eventType, destGUID, spellID, spellName)
+    return {
+        eventType = eventType,
+        destGUID = destGUID,
+        spellID = spellID,
+        spellName = spellName,
+    }
+end
+
+local function SetAura(unit, spellName, spellID)
+    unitAuras[unit] = spellName and { { name = spellName, spellID = spellID } } or nil
+end
+
 Fire("ADDON_LOADED", "WeshArenaAlerts")
 Fire("PLAYER_LOGIN")
 
 -- Milestone 0.1 compatibility smoke checks.
 assert(namespace.initialized)
-assert(namespace.version == "0.2.0")
+assert(namespace.version == "0.3.0")
+assert(namespace.Drinking.drinkAuraName == "Drink")
+assert(namespace.Drinking.KNOWN_DRINK_SPELL_IDS[430])
+assert(namespace.Drinking.KNOWN_DRINK_SPELL_IDS[43154])
 assert(namespace.EnemyOverpower.OVERPOWER_WINDOW_SECONDS == 5.0)
 assert(namespace.EnemyOverpower.OVERPOWER_SPELL_IDS[7384])
 assert(namespace.EnemyOverpower.OVERPOWER_SPELL_IDS[7887])
@@ -219,7 +258,140 @@ arenaState = true
 namespace.Arena:UpdateArenaState()
 assert(namespace.isInArena)
 assert(namespace.Arena.eventFrame.events.COMBAT_LOG_EVENT_UNFILTERED)
+assert(namespace.Arena.eventFrame.events.UNIT_AURA)
 assert(namespace.Arena:GetOpponentByGUID("Enemy-Warrior-1").classFile == "WARRIOR")
+
+-- Milestone 0.3: primary UNIT_AURA detection uses localized names, transitions,
+-- independent GUID states, and the existing single Drinking frame.
+ResetDrinking()
+SetAura("arena2", "Drink", 99999)
+local drinkSoundBefore = soundCount
+Fire("UNIT_AURA", "arena2")
+assert(namespace.Drinking.drinkingByGUID["Enemy-Rogue"])
+assert(namespace.Drinking.drinkingByGUID["Enemy-Rogue"].spellID == 99999)
+assert(namespace.Alerts.frames.drinking:IsShown())
+assert(namespace.Alerts.frames.drinking.text.text == "DRINKING!!!")
+assert(soundCount == drinkSoundBefore + 1)
+
+-- Repeated scans and aura refreshes are idempotent while the aura remains.
+Fire("UNIT_AURA", "arena2")
+assert(soundCount == drinkSoundBefore + 1)
+SetAura("arena2")
+Fire("UNIT_AURA", "arena2")
+assert(not namespace.Drinking.drinkingByGUID["Enemy-Rogue"])
+assert(not namespace.Alerts.frames.drinking:IsShown())
+
+-- Stop followed by a real new start alerts and sounds again.
+SetAura("arena2", "Drink", 10250)
+Fire("UNIT_AURA", "arena2")
+assert(namespace.Drinking.drinkingByGUID["Enemy-Rogue"])
+assert(soundCount == drinkSoundBefore + 2)
+
+-- Multiple enemies retain independent state and share one visual.
+SetAura("arena3", "Drink", 27089)
+Fire("UNIT_AURA", "arena3")
+assert(CountEntries(namespace.Drinking.drinkingByGUID) == 2)
+assert(namespace.Alerts.frames.drinking:IsShown())
+SetAura("arena2")
+Fire("UNIT_AURA", "arena2")
+assert(not namespace.Drinking.drinkingByGUID["Enemy-Rogue"])
+assert(namespace.Drinking.drinkingByGUID["Enemy-Warrior-2"])
+assert(namespace.Alerts.frames.drinking:IsShown())
+SetAura("arena3")
+Fire("UNIT_AURA", "arena3")
+assert(not namespace.Drinking:HasActiveDrinker())
+assert(not namespace.Alerts.frames.drinking:IsShown())
+
+-- CLEU is a fallback and converges through the same idempotent state API.
+drinkSoundBefore = soundCount
+cleuPayload = {
+    now, "SPELL_AURA_APPLIED", false, "Enemy-Rogue", "Sneaky", 0, 0,
+    "Enemy-Rogue", "Sneaky", 0, 0, 43154, "Refreshment", 1, "BUFF",
+}
+Fire("COMBAT_LOG_EVENT_UNFILTERED")
+assert(namespace.Drinking.drinkingByGUID["Enemy-Rogue"])
+assert(soundCount == drinkSoundBefore + 1)
+SetAura("arena2", "Drink", 43154)
+Fire("UNIT_AURA", "arena2")
+namespace.Drinking:HandleCombatLogEvent(AuraEvent(
+    "SPELL_AURA_REFRESH", "Enemy-Rogue", 43154, "Refreshment"
+))
+assert(soundCount == drinkSoundBefore + 1)
+namespace.Drinking:HandleCombatLogEvent(AuraEvent(
+    "SPELL_AURA_REMOVED", "Enemy-Rogue", 43154, "Refreshment"
+))
+assert(not namespace.Drinking.drinkingByGUID["Enemy-Rogue"])
+
+-- Late opponent mapping performs a one-shot scan and catches an existing aura.
+SetAura("arena4", "Drink", 1137)
+arenaUnits.arena4 = { guid = "Enemy-Mage", className = "Mage", classFile = "MAGE", classID = 8, name = "WaterMage" }
+Fire("ARENA_OPPONENT_UPDATE", "arena4", "seen")
+assert(namespace.Drinking.drinkingByGUID["Enemy-Mage"])
+arenaUnits.arena4 = nil
+SetAura("arena4")
+Fire("ARENA_OPPONENT_UPDATE", "arena4", "destroyed")
+assert(not namespace.Drinking.drinkingByGUID["Enemy-Mage"])
+
+-- Negative filters: only a mapped arena unit/GUID with a Drink aura can alert.
+ResetDrinking()
+SetAura("player", "Drink", 430)
+SetAura("party1", "Drink", 430)
+SetAura("arenapet1", "Drink", 430)
+Fire("UNIT_AURA", "player")
+Fire("UNIT_AURA", "party1")
+Fire("UNIT_AURA", "arenapet1")
+namespace.Drinking:HandleCombatLogEvent(AuraEvent("SPELL_AURA_APPLIED", "NPC-1", 430, "Drink"))
+namespace.Drinking:HandleCombatLogEvent(AuraEvent("SPELL_AURA_APPLIED", "Unknown-Enemy", 430, "Drink"))
+SetAura("arena2", "Mana Regeneration", 12345)
+Fire("UNIT_AURA", "arena2")
+namespace.Drinking:HandleCombatLogEvent(AuraEvent("SPELL_AURA_APPLIED", "Enemy-Rogue", 12345, "Mana Regeneration"))
+assert(not namespace.Drinking:HasActiveDrinker())
+assert(not namespace.Alerts.frames.drinking:IsShown())
+
+-- A known ID is only a fallback path, and the existing sound setting is honored.
+ResetDrinking()
+namespace.db.modules.drinking.playSound = false
+SetAura("arena1", "Localized Refreshment", 430)
+drinkSoundBefore = soundCount
+Fire("UNIT_AURA", "arena1")
+assert(namespace.Drinking.drinkingByGUID["Enemy-Warrior-1"])
+assert(namespace.Alerts.frames.drinking:IsShown())
+assert(soundCount == drinkSoundBefore)
+
+-- The duration limits only the visual. A later START refreshes the protected timer.
+ResetDrinking()
+now = 400
+SetAura("arena2", "Drink", 430)
+Fire("UNIT_AURA", "arena2")
+now = 401
+SetAura("arena3", "Drink", 431)
+Fire("UNIT_AURA", "arena3")
+RunTimersThrough(403)
+assert(namespace.Alerts.frames.drinking:IsShown())
+RunTimersThrough(404)
+assert(not namespace.Alerts.frames.drinking:IsShown())
+assert(CountEntries(namespace.Drinking.drinkingByGUID) == 2)
+drinkSoundBefore = soundCount
+Fire("UNIT_AURA", "arena3")
+assert(not namespace.Alerts.frames.drinking:IsShown())
+assert(soundCount == drinkSoundBefore)
+
+-- Module/master switches clear active state and re-enable performs a one-shot scan.
+namespace.db.modules.drinking.enabled = false
+namespace.Drinking:OnSettingsChanged()
+assert(not namespace.Drinking:HasActiveDrinker())
+assert(not namespace.Alerts.frames.drinking:IsShown())
+namespace.db.modules.drinking.enabled = true
+namespace.Drinking:OnSettingsChanged()
+assert(CountEntries(namespace.Drinking.drinkingByGUID) == 2)
+namespace.db.general.enabled = false
+namespace.Drinking:OnSettingsChanged()
+assert(not namespace.Drinking:HasActiveDrinker())
+assert(not namespace.Alerts.frames.drinking:IsShown())
+namespace.db.general.enabled = true
+SetAura("arena2")
+SetAura("arena3")
+namespace.Drinking:OnSettingsChanged()
 
 -- Event-specific parser positions: SWING missType is arg 12; SPELL missType is arg 15.
 local swingParsed = namespace.EnemyOverpower:ParseCombatLogEvent(
@@ -356,18 +528,30 @@ Fire("ARENA_OPPONENT_UPDATE", "arena1", "seen")
 -- 17. Arena exit clears states, mappings, listener, updater, and frame.
 namespace.EnemyOverpower:HandleCombatLogEvent(MissEvent("SWING_MISSED", "Enemy-Warrior-1", playerGUID, "DODGE"))
 assert(namespace.Alerts.frames.enemyOverpower.scripts.OnUpdate)
+SetAura("arena2", "Drink", 430)
+Fire("UNIT_AURA", "arena2")
+assert(namespace.Drinking.drinkingByGUID["Enemy-Rogue"])
 arenaState = false
 namespace.Arena:UpdateArenaState()
 assert(not namespace.isInArena)
 AssertNoOpportunity("arena exit must clean runtime")
+assert(not namespace.Drinking:HasActiveDrinker())
+assert(not namespace.Alerts.frames.drinking:IsShown())
 assert(not namespace.Arena:GetOpponentByGUID("Enemy-Warrior-1"))
 assert(not namespace.Arena.eventFrame.events.COMBAT_LOG_EVENT_UNFILTERED)
+assert(not namespace.Arena.eventFrame.events.UNIT_AURA)
 assert(namespace.Alerts.frames.enemyOverpower.scripts.OnUpdate == nil)
 
 -- 12 and manual-preview compatibility: detector input outside arena is ignored,
 -- while the existing Test Alert remains available.
 namespace.EnemyOverpower:HandleCombatLogEvent(MissEvent("SWING_MISSED", "Enemy-Warrior-1", playerGUID, "DODGE"))
 AssertNoOpportunity("combat log outside arena must be ignored")
+namespace.Drinking:HandleCombatLogEvent(AuraEvent("SPELL_AURA_APPLIED", "Enemy-Rogue", 430, "Drink"))
+namespace.Drinking:ScanUnit("arena2", "UNIT_AURA")
+assert(not namespace.Drinking:HasActiveDrinker())
+assert(not namespace.Alerts.frames.drinking:IsShown())
+namespace.Alerts:ShowDrinkingPreview()
+assert(namespace.Alerts.frames.drinking:IsShown())
 namespace.Alerts:ShowOverpowerPreview()
 assert(namespace.Alerts.frames.enemyOverpower:IsShown())
 

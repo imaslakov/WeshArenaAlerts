@@ -238,6 +238,9 @@ function Options:BuildGeneralPage()
         return WAA.db.general.enabled
     end, function(value)
         WAA.db.general.enabled = value
+        if WAA.Drinking then
+            WAA.Drinking:OnSettingsChanged()
+        end
         if WAA.EnemyOverpower then
             WAA.EnemyOverpower:OnSettingsChanged()
         end
@@ -286,7 +289,10 @@ end
 function Options:BuildDrinkingPage()
     local page = self:CreatePage("drinking", "Drinking", "Large warning text for an enemy player beginning to drink.")
     local db = function() return WAA.db.modules.drinking end
-    self:CreateCheckbox(page, "Enabled", function() return db().enabled end, function(v) db().enabled = v end, -92)
+    self:CreateCheckbox(page, "Enabled", function() return db().enabled end, function(v)
+        db().enabled = v
+        WAA.Drinking:OnSettingsChanged()
+    end, -92)
     self:CreateCheckbox(page, "Play sound", function() return db().playSound end, function(v) db().playSound = v end, -128)
     self:CreateSlider(page, "Text size", 24, 72, 1, 0, function() return db().textSize end, function(v)
         db().textSize = v
