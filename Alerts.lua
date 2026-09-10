@@ -59,6 +59,10 @@ local function PlayAlertSound()
     end
 end
 
+local function GetOverpowerWindowSeconds()
+    return WAA.EnemyOverpower.OVERPOWER_WINDOW_SECONDS
+end
+
 local function FormatShortNumber(value)
     if value >= 1000000 then
         return string.format("%.1fm", value / 1000000)
@@ -76,6 +80,9 @@ function Alerts:Initialize()
     self.frames = {}
     self.hideTokens = {}
     self.positioningMode = false
+    self.overpowerDisplayMode = nil
+    self.overpowerRuntimeActive = false
+    self.overpowerUpdateElapsed = 0
 
     self:CreateDrinkingFrame()
     self:CreateInnerFireFrame()
@@ -157,7 +164,7 @@ function Alerts:CreateOverpowerFrame()
     icon:SetPoint("LEFT", frame, "LEFT", 8, 0)
     local countdown = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
     countdown:SetPoint("LEFT", icon, "RIGHT", 8, 0)
-    countdown:SetText("5.0")
+    countdown:SetText(string.format("%.1f", GetOverpowerWindowSeconds()))
     countdown:SetTextColor(1, 0.35, 0.2)
     frame.countdown = countdown
 end
@@ -237,6 +244,10 @@ function Alerts:LockFrames()
         local frame = self.frames[key]
         self:SetPositioningStyle(frame, false)
         frame:Hide()
+    end
+    self.overpowerDisplayMode = nil
+    if WAA.EnemyOverpower then
+        WAA.EnemyOverpower:RefreshVisual(false)
     end
 end
 
@@ -321,7 +332,7 @@ function Alerts:ShowShieldPreview(persistent)
     end
 end
 
-function Alerts:ShowOverpowerPreview(persistent, silent)
+function Alerts:ApplyOverpowerSettings()
     local settings = WAA.db.modules.enemyOverpower
     local frame = self.frames.enemyOverpower
     frame:SetSize(settings.iconSize + 82, settings.iconSize + 36)
@@ -331,24 +342,102 @@ function Alerts:ShowOverpowerPreview(persistent, silent)
     else
         frame.countdown:Hide()
     end
-    frame.countdown:SetText("5.0")
+end
+
+function Alerts:ShowOverpowerPreview(persistent, silent)
+    local settings = WAA.db.modules.enemyOverpower
+    local frame = self.frames.enemyOverpower
+    local token = self:CancelHide("enemyOverpower")
+    self.overpowerDisplayMode = "preview"
+    self:ApplyOverpowerSettings()
+    local duration = GetOverpowerWindowSeconds()
+    frame.countdown:SetText(string.format("%.1f", duration))
     frame:Show()
     if settings.playSound and not silent then
         PlayAlertSound()
     end
 
     if persistent then
-        self:CancelHide("enemyOverpower")
         return
     end
 
-    self:CancelHide("enemyOverpower")
     local startedAt = GetTime()
-    frame:SetScript("OnUpdate", function(current)
-        local remaining = math.max(0, 5 - (GetTime() - startedAt))
+    self.overpowerUpdateElapsed = 0
+    frame:SetScript("OnUpdate", function(current, elapsed)
+        self.overpowerUpdateElapsed = self.overpowerUpdateElapsed + (elapsed or 0)
+        if self.overpowerUpdateElapsed < 0.05 then
+            return
+        end
+        self.overpowerUpdateElapsed = 0
+        local remaining = math.max(0, duration - (GetTime() - startedAt))
         current.countdown:SetText(string.format("%.1f", remaining))
     end)
-    self:ScheduleHide("enemyOverpower", 5)
+    C_Timer.After(duration, function()
+        if self.hideTokens.enemyOverpower ~= token or self.overpowerDisplayMode ~= "preview" then
+            return
+        end
+        frame:SetScript("OnUpdate", nil)
+        self.overpowerDisplayMode = nil
+        if self.overpowerRuntimeActive and WAA.EnemyOverpower then
+            WAA.EnemyOverpower:RefreshVisual(false)
+        elseif not self.positioningMode then
+            frame:Hide()
+        end
+    end)
+end
+
+function Alerts:ShowOverpowerRuntime(remaining, playSound)
+    local settings = WAA.db.modules.enemyOverpower
+    self.overpowerRuntimeActive = true
+
+    if playSound and settings.playSound then
+        PlayAlertSound()
+    end
+    if self.positioningMode or self.overpowerDisplayMode == "preview" then
+        return
+    end
+
+    if self.overpowerDisplayMode == "runtime" then
+        self:UpdateOverpowerRuntime(remaining)
+        return
+    end
+
+    local frame = self.frames.enemyOverpower
+    self:CancelHide("enemyOverpower")
+    self.overpowerDisplayMode = "runtime"
+    self:ApplyOverpowerSettings()
+    frame.countdown:SetText(string.format("%.1f", math.max(0, remaining or 0)))
+    frame:Show()
+    self.overpowerUpdateElapsed = 0
+    frame:SetScript("OnUpdate", function(_, elapsed)
+        self.overpowerUpdateElapsed = self.overpowerUpdateElapsed + (elapsed or 0)
+        if self.overpowerUpdateElapsed < 0.05 then
+            return
+        end
+        self.overpowerUpdateElapsed = 0
+        if WAA.EnemyOverpower then
+            WAA.EnemyOverpower:Update(GetTime())
+        end
+    end)
+end
+
+function Alerts:UpdateOverpowerRuntime(remaining)
+    if self.overpowerDisplayMode ~= "runtime" then
+        return
+    end
+    self:ApplyOverpowerSettings()
+    self.frames.enemyOverpower.countdown:SetText(string.format("%.1f", math.max(0, remaining)))
+end
+
+function Alerts:HideOverpowerRuntime()
+    self.overpowerRuntimeActive = false
+    if self.overpowerDisplayMode ~= "runtime" then
+        return
+    end
+    local frame = self.frames.enemyOverpower
+    frame:SetScript("OnUpdate", nil)
+    frame:Hide()
+    self.overpowerDisplayMode = nil
 end
 
 function Alerts:TestAll()
@@ -370,6 +459,8 @@ function Alerts:ClearRuntime()
     self.positioningMode = false
     WAA.isUnlocked = false
     self:HideAll()
+    self.overpowerRuntimeActive = false
+    self.overpowerDisplayMode = nil
     for _, key in ipairs(POSITION_KEYS) do
         self:SetPositioningStyle(self.frames[key], false)
     end

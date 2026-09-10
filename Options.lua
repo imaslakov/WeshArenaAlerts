@@ -238,6 +238,9 @@ function Options:BuildGeneralPage()
         return WAA.db.general.enabled
     end, function(value)
         WAA.db.general.enabled = value
+        if WAA.EnemyOverpower then
+            WAA.EnemyOverpower:OnSettingsChanged()
+        end
     end, -92)
 
     local heading = CreateLabel(page, "Positioning / Preview", "GameFontNormal")
@@ -348,7 +351,10 @@ function Options:BuildOverpowerPage()
         "Shows a future opportunity window after an enemy Warrior's melee attack is dodged; it does not represent your own Overpower."
     )
     local db = function() return WAA.db.modules.enemyOverpower end
-    self:CreateCheckbox(page, "Enabled", function() return db().enabled end, function(v) db().enabled = v end, -92)
+    self:CreateCheckbox(page, "Enabled", function() return db().enabled end, function(v)
+        db().enabled = v
+        WAA.EnemyOverpower:OnSettingsChanged()
+    end, -92)
     self:CreateCheckbox(page, "Show countdown", function() return db().showCountdown end, function(v)
         db().showCountdown = v
         self:RefreshPositioningPreview("enemyOverpower")
@@ -424,7 +430,14 @@ end
 
 function Options:RegisterSlashCommand()
     SLASH_WESHARENAALERTS1 = "/waa"
-    SlashCmdList.WESHARENAALERTS = function()
+    SlashCmdList.WESHARENAALERTS = function(message)
+        local command = string.lower((message or ""):match("^%s*(.-)%s*$"))
+        if command == "debug" then
+            WAA.debugEnabled = not WAA.debugEnabled
+            WAA.db.general.debug = WAA.debugEnabled
+            print("WeshArenaAlerts debug: " .. (WAA.debugEnabled and "ON" or "OFF"))
+            return
+        end
         self:Open()
     end
 end

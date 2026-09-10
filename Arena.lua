@@ -60,6 +60,9 @@ end
 function Arena:Deactivate()
     self.eventFrame:UnregisterEvent("ARENA_OPPONENT_UPDATE")
     self:UnregisterRuntimeEvents()
+    if WAA.EnemyOverpower then
+        WAA.EnemyOverpower:ClearRuntime()
+    end
     self:ClearOpponentData()
     WAA.Alerts:ClearRuntime()
     WAA:Debug("Arena runtime deactivated")
@@ -70,17 +73,21 @@ function Arena:ClearOpponentData()
     wipe(self.opponentsByGUID)
 end
 
-function Arena:UpdateOpponent(unitToken)
+function Arena:UpdateOpponent(unitToken, updateType)
     if not WAA.isInArena or not unitToken then
         return
     end
 
+    local wasRemoved = updateType == "cleared" or updateType == "destroyed"
+    local guid = not wasRemoved and UnitGUID(unitToken) or nil
     local old = self.opponents[unitToken]
-    if old and old.guid then
+    if old and old.guid and old.guid ~= guid then
         self.opponentsByGUID[old.guid] = nil
+        if WAA.EnemyOverpower then
+            WAA.EnemyOverpower:RemoveOpponent(old.guid)
+        end
     end
 
-    local guid = UnitGUID(unitToken)
     if not guid then
         self.opponents[unitToken] = nil
         return
@@ -93,9 +100,17 @@ function Arena:UpdateOpponent(unitToken)
         className = className,
         classFile = classFile,
         classID = classID,
+        name = UnitName and UnitName(unitToken) or nil,
     }
     self.opponents[unitToken] = metadata
     self.opponentsByGUID[guid] = metadata
+    WAA:Debug(
+        "Arena opponent mapped:",
+        unitToken,
+        guid,
+        classFile or "UNKNOWN",
+        metadata.name or "UNKNOWN"
+    )
 end
 
 function Arena:RefreshOpponents()

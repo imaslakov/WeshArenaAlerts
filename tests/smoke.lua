@@ -1,6 +1,14 @@
 local frames = {}
 local timers = {}
 local arenaState = false
+local now = 100
+local soundCount = 0
+local openedSettings = 0
+local printed = {}
+local playerGUID = "Player-Self"
+local arenaUnits = {}
+local cleuPayload
+local unpackValues = table.unpack or unpack
 
 local Object = {}
 Object.__index = function(_, key)
@@ -12,8 +20,7 @@ Object.__index = function(_, key)
 end
 
 local function NewObject()
-    local object = setmetatable({ events = {}, scripts = {}, shown = false }, Object)
-    return object
+    return setmetatable({ events = {}, scripts = {}, shown = false }, Object)
 end
 
 function Object:RegisterEvent(event) self.events[event] = true end
@@ -51,7 +58,7 @@ function Object:GetID() return self.id or 77 end
 
 function CreateFrame()
     local frame = NewObject()
-    table.insert(frames, frame)
+    frames[#frames + 1] = frame
     return frame
 end
 
@@ -61,7 +68,11 @@ GameFontNormal = NewObject()
 GameFontHighlight = NewObject()
 SlashCmdList = {}
 SOUNDKIT = { RAID_WARNING = 1 }
-C_Timer = { After = function(_, callback) table.insert(timers, callback) end }
+C_Timer = {
+    After = function(duration, callback)
+        timers[#timers + 1] = { due = now + duration, callback = callback, fired = false }
+    end,
+}
 Settings = {
     RegisterCanvasLayoutCategory = function()
         local category = NewObject()
@@ -69,19 +80,43 @@ Settings = {
         return category, NewObject()
     end,
     RegisterAddOnCategory = function() end,
-    OpenToCategory = function(categoryID) assert(categoryID == 77) end,
+    OpenToCategory = function(categoryID)
+        assert(categoryID == 77)
+        openedSettings = openedSettings + 1
+    end,
 }
 
 function GetSpellTexture() return nil end
-function PlaySound() end
-function GetTime() return 100 end
-function UnitGUID() return nil end
-function UnitClass() return "Warrior", "WARRIOR", 1 end
+function PlaySound() soundCount = soundCount + 1 end
+function GetTime() return now end
+function UnitGUID(unit)
+    if unit == "player" then return playerGUID end
+    return arenaUnits[unit] and arenaUnits[unit].guid or nil
+end
+function UnitClass(unit)
+    local opponent = arenaUnits[unit]
+    if not opponent then return nil end
+    return opponent.className, opponent.classFile, opponent.classID
+end
+function UnitName(unit) return arenaUnits[unit] and arenaUnits[unit].name or nil end
 function IsInInstance() return arenaState, arenaState and "arena" or "none" end
+function CombatLogGetCurrentEventInfo() return unpackValues(cleuPayload) end
 function wipe(target) for key in pairs(target) do target[key] = nil end end
 
+local realPrint = print
+function print(message)
+    printed[#printed + 1] = tostring(message)
+end
+
 local namespace = {}
-local files = { "Defaults.lua", "Core.lua", "Alerts.lua", "Arena.lua", "Options.lua" }
+local files = {
+    "Defaults.lua",
+    "Core.lua",
+    "Alerts.lua",
+    "Arena.lua",
+    "EnemyOverpower.lua",
+    "Options.lua",
+}
 for _, file in ipairs(files) do
     local chunk = assert(loadfile(file))
     chunk("WeshArenaAlerts", namespace)
@@ -97,27 +132,243 @@ local function Fire(event, ...)
     end
 end
 
+local function RunTimersThrough(targetTime)
+    now = targetTime
+    local ranTimer
+    repeat
+        ranTimer = false
+        for _, timer in ipairs(timers) do
+            if not timer.fired and timer.due <= now then
+                timer.fired = true
+                timer.callback()
+                ranTimer = true
+            end
+        end
+    until not ranTimer
+end
+
+local function CountEntries(target)
+    local count = 0
+    for _ in pairs(target) do count = count + 1 end
+    return count
+end
+
+local function AssertNoOpportunity(message)
+    assert(CountEntries(namespace.EnemyOverpower.activeOpportunities) == 0, message)
+    assert(not namespace.Alerts.frames.enemyOverpower:IsShown(), message .. " (frame visible)")
+end
+
+local function ResetRuntime()
+    namespace.db.general.enabled = true
+    namespace.db.modules.enemyOverpower.enabled = true
+    namespace.db.modules.enemyOverpower.playSound = true
+    namespace.db.modules.enemyOverpower.showCountdown = true
+    namespace.EnemyOverpower:ClearRuntime()
+end
+
+local function MissEvent(eventType, sourceGUID, destGUID, missType, spellID)
+    return {
+        eventType = eventType,
+        sourceGUID = sourceGUID,
+        destGUID = destGUID,
+        missType = missType,
+        spellID = spellID,
+    }
+end
+
+local function SpellEvent(eventType, sourceGUID, destGUID, spellID)
+    return {
+        eventType = eventType,
+        sourceGUID = sourceGUID,
+        destGUID = destGUID,
+        spellID = spellID,
+    }
+end
+
 Fire("ADDON_LOADED", "WeshArenaAlerts")
 Fire("PLAYER_LOGIN")
 
+-- Milestone 0.1 compatibility smoke checks.
 assert(namespace.initialized)
+assert(namespace.version == "0.2.0")
+assert(namespace.EnemyOverpower.OVERPOWER_WINDOW_SECONDS == 5.0)
+assert(namespace.EnemyOverpower.OVERPOWER_SPELL_IDS[7384])
+assert(namespace.EnemyOverpower.OVERPOWER_SPELL_IDS[7887])
+assert(namespace.EnemyOverpower.OVERPOWER_SPELL_IDS[11584])
+assert(namespace.EnemyOverpower.OVERPOWER_SPELL_IDS[11585])
 assert(namespace.db.modules.enemyOverpower.showCountdown)
 assert(namespace.Options.category:GetID() == 77)
 assert(type(SlashCmdList.WESHARENAALERTS) == "function")
-
 namespace.Alerts:TestAll()
 namespace.Alerts:UnlockFrames()
 namespace.Alerts:LockFrames()
 namespace:ResetPositions()
-SlashCmdList.WESHARENAALERTS()
+SlashCmdList.WESHARENAALERTS("")
+assert(openedSettings == 1)
+SlashCmdList.WESHARENAALERTS(" debug ")
+assert(namespace.debugEnabled and namespace.db.general.debug)
+assert(printed[#printed] == "WeshArenaAlerts debug: ON")
+SlashCmdList.WESHARENAALERTS("debug")
+assert(not namespace.debugEnabled and not namespace.db.general.debug)
+assert(printed[#printed] == "WeshArenaAlerts debug: OFF")
 
+arenaUnits.arena1 = { guid = "Enemy-Warrior-1", className = "Warrior", classFile = "WARRIOR", classID = 1, name = "ArmsOne" }
+arenaUnits.arena2 = { guid = "Enemy-Rogue", className = "Rogue", classFile = "ROGUE", classID = 4, name = "Sneaky" }
+arenaUnits.arena3 = { guid = "Enemy-Warrior-2", className = "Warrior", classFile = "WARRIOR", classID = 1, name = "ArmsTwo" }
 arenaState = true
 namespace.Arena:UpdateArenaState()
 assert(namespace.isInArena)
+assert(namespace.Arena.eventFrame.events.COMBAT_LOG_EVENT_UNFILTERED)
+assert(namespace.Arena:GetOpponentByGUID("Enemy-Warrior-1").classFile == "WARRIOR")
+
+-- Event-specific parser positions: SWING missType is arg 12; SPELL missType is arg 15.
+local swingParsed = namespace.EnemyOverpower:ParseCombatLogEvent(
+    now, "SWING_MISSED", false, "Enemy-Warrior-1", "ArmsOne", 0, 0,
+    playerGUID, "Self", 0, 0, "DODGE", false, 0
+)
+assert(swingParsed.missType == "DODGE" and swingParsed.spellID == nil)
+local spellParsed = namespace.EnemyOverpower:ParseCombatLogEvent(
+    now, "SPELL_MISSED", false, "Enemy-Warrior-1", "ArmsOne", 0, 0,
+    playerGUID, "Self", 0, 0, 12345, "Melee Special", 1, "DODGE", false, 0
+)
+assert(spellParsed.spellID == 12345 and spellParsed.missType == "DODGE")
+
+-- 1. Raw SWING_MISSED from a mapped enemy Warrior to player starts the alert.
+ResetRuntime()
+cleuPayload = {
+    now, "SWING_MISSED", false, "Enemy-Warrior-1", "ArmsOne", 0, 0,
+    playerGUID, "Self", 0, 0, "DODGE", false, 0,
+}
+local soundBefore = soundCount
+Fire("COMBAT_LOG_EVENT_UNFILTERED")
+assert(namespace.EnemyOverpower.activeOpportunities["Enemy-Warrior-1"])
+assert(namespace.Alerts.frames.enemyOverpower:IsShown())
+assert(soundCount == soundBefore + 1)
+
+-- 2. SPELL_MISSED DODGE uses its distinct payload offset and also starts.
+ResetRuntime()
+namespace.EnemyOverpower:HandleCombatLogEvent(MissEvent(
+    "SPELL_MISSED", "Enemy-Warrior-1", playerGUID, "DODGE", 12345
+))
+assert(namespace.EnemyOverpower.activeOpportunities["Enemy-Warrior-1"])
+
+-- Existing visual and sound settings apply to the automatic alert.
+ResetRuntime()
+namespace.db.modules.enemyOverpower.showCountdown = false
+namespace.db.modules.enemyOverpower.playSound = false
+soundBefore = soundCount
+namespace.EnemyOverpower:HandleCombatLogEvent(MissEvent(
+    "SWING_MISSED", "Enemy-Warrior-1", playerGUID, "DODGE"
+))
+assert(namespace.Alerts.frames.enemyOverpower:IsShown())
+assert(not namespace.Alerts.frames.enemyOverpower.countdown:IsShown())
+assert(soundCount == soundBefore)
+
+-- 3. A repeat dodge refreshes expiry; the first timer cannot clear the new generation.
+ResetRuntime()
+now = 200
+local refreshSoundBefore = soundCount
+namespace.EnemyOverpower:HandleCombatLogEvent(MissEvent(
+    "SWING_MISSED", "Enemy-Warrior-1", playerGUID, "DODGE"
+))
+local firstExpiry = namespace.EnemyOverpower.activeOpportunities["Enemy-Warrior-1"].expiresAt
+now = 202
+namespace.EnemyOverpower:HandleCombatLogEvent(MissEvent(
+    "SWING_MISSED", "Enemy-Warrior-1", playerGUID, "DODGE"
+))
+local refreshedExpiry = namespace.EnemyOverpower.activeOpportunities["Enemy-Warrior-1"].expiresAt
+assert(firstExpiry == 205 and refreshedExpiry == 207)
+RunTimersThrough(205)
+assert(namespace.EnemyOverpower.activeOpportunities["Enemy-Warrior-1"])
+assert(namespace.Alerts.frames.enemyOverpower:IsShown())
+assert(soundCount == refreshSoundBefore + 2)
+
+-- 4-5. Two Warriors retain independent states; the visual follows the longest window.
+ResetRuntime()
+now = 300
+namespace.EnemyOverpower:HandleCombatLogEvent(MissEvent(
+    "SWING_MISSED", "Enemy-Warrior-1", playerGUID, "DODGE"
+))
+now = 301
+namespace.EnemyOverpower:HandleCombatLogEvent(MissEvent(
+    "SPELL_MISSED", "Enemy-Warrior-2", playerGUID, "DODGE", 12345
+))
+assert(CountEntries(namespace.EnemyOverpower.activeOpportunities) == 2)
+assert(namespace.Alerts.frames.enemyOverpower:IsShown())
+assert(namespace.Alerts.frames.enemyOverpower.countdown.text == "5.0")
+RunTimersThrough(305)
+assert(not namespace.EnemyOverpower.activeOpportunities["Enemy-Warrior-1"])
+assert(namespace.EnemyOverpower.activeOpportunities["Enemy-Warrior-2"])
+assert(namespace.Alerts.frames.enemyOverpower:IsShown())
+namespace.EnemyOverpower:Update(305.5)
+assert(namespace.Alerts.frames.enemyOverpower.countdown.text == "0.5")
+
+-- 6 and 16. Actual Overpower use consumes only its state; duplicate CLEU is harmless.
+namespace.EnemyOverpower:HandleCombatLogEvent(SpellEvent(
+    "SPELL_CAST_SUCCESS", "Enemy-Warrior-2", "Other-Target", 11585
+))
+AssertNoOpportunity("Overpower use should consume opportunity")
+assert(namespace.Alerts.frames.enemyOverpower.countdown.text == "0.0")
+namespace.EnemyOverpower:HandleCombatLogEvent(SpellEvent(
+    "SPELL_DAMAGE", "Enemy-Warrior-2", "Other-Target", 11585
+))
+AssertNoOpportunity("duplicate Overpower event should be idempotent")
+
+-- 7-11 and 15. Source, destination, mapping, and miss type filters.
+ResetRuntime()
+namespace.EnemyOverpower:HandleCombatLogEvent(MissEvent("SWING_MISSED", "Enemy-Rogue", playerGUID, "DODGE"))
+AssertNoOpportunity("enemy Rogue must be ignored")
+namespace.EnemyOverpower:HandleCombatLogEvent(MissEvent("SWING_MISSED", "Enemy-Warrior-1", "Arena-Teammate", "DODGE"))
+AssertNoOpportunity("teammate dodge must be ignored")
+namespace.EnemyOverpower:HandleCombatLogEvent(MissEvent("SWING_MISSED", "Friendly-Warrior", playerGUID, "DODGE"))
+AssertNoOpportunity("friendly Warrior must be ignored")
+for _, missType in ipairs({
+    "MISS", "PARRY", "BLOCK", "EVADE", "IMMUNE", "ABSORB", "RESIST",
+    "DEFLECT", "REFLECT",
+}) do
+    namespace.EnemyOverpower:HandleCombatLogEvent(MissEvent(
+        "SWING_MISSED", "Enemy-Warrior-1", playerGUID, missType
+    ))
+    AssertNoOpportunity(missType .. " must be ignored")
+end
+namespace.EnemyOverpower:HandleCombatLogEvent(MissEvent("SWING_MISSED", "Unknown-Warrior", playerGUID, "DODGE"))
+AssertNoOpportunity("unknown GUID must be ignored")
+
+-- 13-14. Both module and master switches gate automatic detection.
+namespace.db.modules.enemyOverpower.enabled = false
+namespace.EnemyOverpower:HandleCombatLogEvent(MissEvent("SWING_MISSED", "Enemy-Warrior-1", playerGUID, "DODGE"))
+AssertNoOpportunity("disabled module must not alert")
+namespace.db.modules.enemyOverpower.enabled = true
+namespace.db.general.enabled = false
+namespace.EnemyOverpower:HandleCombatLogEvent(MissEvent("SWING_MISSED", "Enemy-Warrior-1", playerGUID, "DODGE"))
+AssertNoOpportunity("disabled master switch must not alert")
+namespace.db.general.enabled = true
+
+-- Opponent removal invalidates its mapping and opportunity without polling.
+namespace.EnemyOverpower:HandleCombatLogEvent(MissEvent("SWING_MISSED", "Enemy-Warrior-1", playerGUID, "DODGE"))
+arenaUnits.arena1 = nil
+Fire("ARENA_OPPONENT_UPDATE", "arena1", "cleared")
+AssertNoOpportunity("removed opponent opportunity must be cleared")
+assert(not namespace.Arena:GetOpponentByGUID("Enemy-Warrior-1"))
+arenaUnits.arena1 = { guid = "Enemy-Warrior-1", className = "Warrior", classFile = "WARRIOR", classID = 1, name = "ArmsOne" }
+Fire("ARENA_OPPONENT_UPDATE", "arena1", "seen")
+
+-- 17. Arena exit clears states, mappings, listener, updater, and frame.
+namespace.EnemyOverpower:HandleCombatLogEvent(MissEvent("SWING_MISSED", "Enemy-Warrior-1", playerGUID, "DODGE"))
+assert(namespace.Alerts.frames.enemyOverpower.scripts.OnUpdate)
 arenaState = false
 namespace.Arena:UpdateArenaState()
 assert(not namespace.isInArena)
+AssertNoOpportunity("arena exit must clean runtime")
+assert(not namespace.Arena:GetOpponentByGUID("Enemy-Warrior-1"))
+assert(not namespace.Arena.eventFrame.events.COMBAT_LOG_EVENT_UNFILTERED)
+assert(namespace.Alerts.frames.enemyOverpower.scripts.OnUpdate == nil)
 
-for _, callback in ipairs(timers) do callback() end
+-- 12 and manual-preview compatibility: detector input outside arena is ignored,
+-- while the existing Test Alert remains available.
+namespace.EnemyOverpower:HandleCombatLogEvent(MissEvent("SWING_MISSED", "Enemy-Warrior-1", playerGUID, "DODGE"))
+AssertNoOpportunity("combat log outside arena must be ignored")
+namespace.Alerts:ShowOverpowerPreview()
+assert(namespace.Alerts.frames.enemyOverpower:IsShown())
 
-print("WeshArenaAlerts smoke test passed")
+realPrint("WeshArenaAlerts smoke test passed")

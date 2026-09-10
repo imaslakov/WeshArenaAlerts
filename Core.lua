@@ -1,7 +1,7 @@
 local addonName, WAA = ...
 
 WAA.name = addonName
-WAA.version = "0.1.0"
+WAA.version = "0.2.0"
 WAA.isInArena = false
 WAA.isUnlocked = false
 WAA.initialized = false
@@ -89,6 +89,7 @@ function WAA:Initialize()
     self:ApplyDefaults()
     self.Alerts:Initialize()
     self.Arena:Initialize()
+    self.EnemyOverpower:Initialize()
     self.initialized = true
     self:Debug("Initialized", self.version)
 end
