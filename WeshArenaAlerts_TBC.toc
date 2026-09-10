@@ -1,0 +1,12 @@
+## Interface: 20506
+## Title: WeshArenaAlerts
+## Notes: Arena-only combat alert foundation and configurable previews for TBC Anniversary.
+## Author: Wesh
+## Version: 0.1.0
+## SavedVariables: WeshArenaAlertsDB
+
+Defaults.lua
+Core.lua
+Alerts.lua
+Arena.lua
+Options.lua
