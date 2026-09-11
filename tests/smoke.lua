@@ -393,6 +393,7 @@ assert(namespace.InnerFire.INNER_FIRE_SPELL_IDS[588])
 assert(namespace.InnerFire.INNER_FIRE_SPELL_IDS[25431])
 assert(namespace.ShieldAbsorb.POWER_WORD_SHIELD_SPELL_IDS[17])
 assert(namespace.ShieldAbsorb.POWER_WORD_SHIELD_SPELL_IDS[25218])
+assert(namespace.ShieldAbsorb.MAX_AURA_POINT_CANDIDATES == 5)
 assert(namespace.db.modules.shieldAbsorb.displayMode == "ICON_NUMBER")
 assert(namespace.Alerts.frames.scatter.mouseEnabled == false)
 assert(namespace.db.modules.enemyOverpower.showCountdown)
@@ -986,6 +987,7 @@ assert(namespace.ShieldAbsorb.amount == 1847)
 assert(namespace.ShieldAbsorb.observedMaximum == 1847)
 assert(namespace.ShieldAbsorb.fillFraction == 1)
 assert(namespace.ShieldAbsorb.amountSource == namespace.ShieldAbsorb.SOURCE_AURA_POINTS)
+assert(namespace.ShieldAbsorb.amountIndex == 1)
 assert(namespace.ShieldAbsorb.spellID == 25218 and namespace.ShieldAbsorb.auraInstanceID == 101)
 assert(namespace.Alerts.frames.shieldAbsorb:IsShown())
 assert(namespace.Alerts.frames.shieldAbsorb.value.text == "1847")
@@ -1058,15 +1060,26 @@ assert(namespace.ShieldAbsorb.amount == 1500)
 assert(namespace.ShieldAbsorb.amountSource == namespace.ShieldAbsorb.SOURCE_TOTAL_ABSORB)
 
 -- Anniversary may expose points[1] as a zero placeholder. Zero must not win over
--- the working unit-total API, and two zero sources must become UNKNOWN, not "0".
+-- a unique positive value at another index. Multiple positive point values remain
+-- ambiguous and use the guarded unit-total fallback instead of being guessed.
 totalAbsorb = 1847
-SetAura("player", "Power Word: Shield", 25218, nil, { 0 })
+SetAura("player", "Power Word: Shield", 25218, nil, { 0, 1847, 0 })
 Fire("UNIT_AURA", "player")
 assert(namespace.ShieldAbsorb.state == namespace.ShieldAbsorb.STATE_KNOWN)
 assert(namespace.ShieldAbsorb.amount == 1847)
-assert(namespace.ShieldAbsorb.amountSource == namespace.ShieldAbsorb.SOURCE_TOTAL_ABSORB)
+assert(namespace.ShieldAbsorb.amountSource == namespace.ShieldAbsorb.SOURCE_AURA_POINTS)
+assert(namespace.ShieldAbsorb.amountIndex == 2)
 assert(shieldFrame.value.text == "1847")
+totalAbsorb = 1600
+SetAura("player", "Power Word: Shield", 25218, nil, { 100, 200, 0 })
+Fire("UNIT_AURA", "player")
+assert(namespace.ShieldAbsorb.amount == 1600)
+assert(namespace.ShieldAbsorb.amountSource == namespace.ShieldAbsorb.SOURCE_TOTAL_ABSORB)
+assert(namespace.ShieldAbsorb.amountIndex == nil)
+
+-- Two zero sources become UNKNOWN, not the false text "0".
 totalAbsorb = 0
+SetAura("player", "Power Word: Shield", 25218, nil, { 0, 0, 0 })
 Fire("UNIT_ABSORB_AMOUNT_CHANGED", "player")
 assert(namespace.ShieldAbsorb.state == namespace.ShieldAbsorb.STATE_UNKNOWN)
 assert(shieldFrame.value.text == "?")
@@ -1156,6 +1169,7 @@ SetAura("player", "Power Word: Shield", 25218, nil, { secretAuraPoint })
 Fire("UNIT_ABSORB_AMOUNT_CHANGED", "player")
 assert(namespace.ShieldAbsorb.state == namespace.ShieldAbsorb.STATE_KNOWN)
 assert(namespace.ShieldAbsorb.amountSource == namespace.ShieldAbsorb.SOURCE_TOTAL_ABSORB)
+assert(namespace.ShieldAbsorb.amountIndex == nil)
 assert(namespace.ShieldAbsorb.amount == secretValue and namespace.ShieldAbsorb.amountIsSecret)
 assert(shieldFrame.value.text == secretValue and shortFormatterCalls == 0)
 assert(namespace.ShieldAbsorb.fillFraction == nil and shieldFrame.bar.value == 0)

@@ -18,7 +18,7 @@ local POWER_WORD_SHIELD_SPELL_IDS = {
     [25218] = true,
 }
 local MAX_HELPFUL_AURAS = 40
-local AURA_POINTS_ABSORB_INDEX = 1
+local MAX_AURA_POINT_CANDIDATES = 5
 
 ShieldAbsorb.STATE_ABSENT = "ABSENT"
 ShieldAbsorb.STATE_KNOWN = "KNOWN"
@@ -27,7 +27,7 @@ ShieldAbsorb.SOURCE_AURA_POINTS = "AURA_POINTS"
 ShieldAbsorb.SOURCE_TOTAL_ABSORB = "TOTAL_ABSORB_FALLBACK"
 ShieldAbsorb.SOURCE_UNKNOWN = "UNKNOWN"
 ShieldAbsorb.POWER_WORD_SHIELD_SPELL_IDS = POWER_WORD_SHIELD_SPELL_IDS
-ShieldAbsorb.AURA_POINTS_ABSORB_INDEX = AURA_POINTS_ABSORB_INDEX
+ShieldAbsorb.MAX_AURA_POINT_CANDIDATES = MAX_AURA_POINT_CANDIDATES
 
 local function IsUsableAccessibleAmount(value)
     local ok, usable = pcall(function()
@@ -67,6 +67,7 @@ function ShieldAbsorb:ResetState()
     self.amount = nil
     self.amountIsSecret = false
     self.amountSource = nil
+    self.amountIndex = nil
     self.observedMaximum = nil
     self.fillFraction = nil
 end
@@ -142,8 +143,9 @@ function ShieldAbsorb:GetPlayerAura()
     return { found = false }
 end
 
--- This function is called only after canonical PW:S spell-ID validation. Index 1
--- is the Anniversary payload assumption that must be confirmed in the live client.
+-- This function is called only after canonical PW:S spell-ID validation. AuraData
+-- does not define one stable absorb index, so accept only one unambiguous positive
+-- candidate instead of guessing among multiple spell-effect values.
 function ShieldAbsorb:ExtractAuraAbsorb(aura)
     if not aura or not POWER_WORD_SHIELD_SPELL_IDS[aura.spellID] then
         return nil, "not canonical Power Word: Shield"
@@ -152,15 +154,38 @@ function ShieldAbsorb:ExtractAuraAbsorb(aura)
         return nil, "AuraData.points unavailable"
     end
 
-    local value = aura.points[AURA_POINTS_ABSORB_INDEX]
-    if self:IsSecretValue(value) then
-        WAA:Debug("Shield AuraData.points[1] is secret; trying total absorb fallback")
-        return nil, "AuraData.points[1] is secret and cannot be validated"
+    local candidates = {}
+    local secretCount = 0
+    for index = 1, MAX_AURA_POINT_CANDIDATES do
+        local value = aura.points[index]
+        if self:IsSecretValue(value) then
+            secretCount = secretCount + 1
+            WAA:Debug("Shield aura point secret:", "index=" .. tostring(index))
+        elseif IsUsableAccessibleAmount(value) then
+            candidates[#candidates + 1] = { value = value, index = index }
+            WAA:Debug(
+                "Shield aura point candidate:",
+                "index=" .. tostring(index),
+                "amount=" .. tostring(value)
+            )
+        end
     end
-    if IsUsableAccessibleAmount(value) then
-        return { value = value, isSecret = false }
+
+    if #candidates == 1 and secretCount == 0 then
+        return {
+            value = candidates[1].value,
+            isSecret = false,
+            index = candidates[1].index,
+        }
     end
-    return nil, "AuraData.points[1] missing, zero, or unusable"
+    if #candidates > 1 then
+        WAA:Debug("Shield aura points ambiguous:", "positiveCandidates=" .. tostring(#candidates))
+        return nil, "AuraData.points has multiple positive candidates"
+    end
+    if secretCount > 0 then
+        return nil, "AuraData.points candidates are secret and cannot be validated"
+    end
+    return nil, "AuraData.points has no positive usable candidate"
 end
 
 function ShieldAbsorb:GetTotalAbsorbFallback()
@@ -214,7 +239,8 @@ function ShieldAbsorb:BuildSnapshot()
     end
     WAA:Debug(
         "Shield amount source=" .. source,
-        "amount=" .. SafeAmountText(amount.value, amount.isSecret)
+        "amount=" .. SafeAmountText(amount.value, amount.isSecret),
+        amount.index and ("index=" .. tostring(amount.index)) or ""
     )
     return {
         state = self.STATE_KNOWN,
@@ -225,6 +251,7 @@ function ShieldAbsorb:BuildSnapshot()
         amount = amount.value,
         amountIsSecret = amount.isSecret,
         amountSource = source,
+        amountIndex = amount.index,
     }
 end
 
@@ -233,6 +260,7 @@ function ShieldAbsorb:ApplySnapshot(snapshot)
     local oldAmount = self.amount
     local oldAmountIsSecret = self.amountIsSecret
     local oldAmountSource = self.amountSource
+    local oldAmountIndex = self.amountIndex
     local oldSpellID = self.spellID
     local oldAuraInstanceID = self.auraInstanceID
     local oldFillFraction = self.fillFraction
@@ -283,6 +311,7 @@ function ShieldAbsorb:ApplySnapshot(snapshot)
     self.amount = snapshot.amount
     self.amountIsSecret = snapshot.amountIsSecret == true
     self.amountSource = snapshot.amountSource
+    self.amountIndex = snapshot.amountIndex
     self.observedMaximum = observedMaximum
     self.fillFraction = fillFraction
 
@@ -301,6 +330,7 @@ function ShieldAbsorb:ApplySnapshot(snapshot)
         or oldAuraInstanceID ~= self.auraInstanceID
         or amountChanged
         or oldAmountSource ~= self.amountSource
+        or oldAmountIndex ~= self.amountIndex
         or oldFillFraction ~= self.fillFraction
     if changed then
         self:RefreshVisual()
@@ -314,6 +344,7 @@ function ShieldAbsorb:MarkSecretDisplayUnavailable()
     self.amount = nil
     self.amountIsSecret = false
     self.amountSource = self.SOURCE_UNKNOWN
+    self.amountIndex = nil
     self.fillFraction = nil
     WAA:Debug("Shield amount unavailable: secret value cannot be displayed safely")
     if oldState ~= self.state then
