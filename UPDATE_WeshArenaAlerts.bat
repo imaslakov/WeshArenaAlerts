@@ -2,7 +2,7 @@
 setlocal EnableExtensions EnableDelayedExpansion
 
 title WeshArenaAlerts - One-Click Updater
-mode con cols=82 lines=31 >nul 2>&1
+mode con cols=82 lines=32 >nul 2>&1
 color 0B
 
 set "ADDONS_DIR=D:\World of Warcraft\_anniversary_\Interface\AddOns"
@@ -12,10 +12,24 @@ set "BACKUP_DIR=%ADDONS_DIR%\WeshArenaAlerts.__backup"
 set "BUILD_FILE=%ADDON_DIR%\.wesh_build"
 set "REPO_API=https://api.github.com/repos/imaslakov/WeshArenaAlerts/commits/main"
 set "ZIP_URL=https://github.com/imaslakov/WeshArenaAlerts/archive/refs/heads/main.zip"
+set "SELF_UPDATE_URL=https://raw.githubusercontent.com/imaslakov/WeshArenaAlerts/main/UPDATE_WeshArenaAlerts.bat"
+set "SELF_PATH=%~f0"
 set "TEMP_DIR=%TEMP%\WeshArenaAlerts_Update"
 set "ZIP_FILE=%TEMP_DIR%\WeshArenaAlerts-main.zip"
 set "EXTRACT_DIR=%TEMP_DIR%\extract"
 set "SOURCE_DIR=%EXTRACT_DIR%\WeshArenaAlerts-main"
+set "SELF_UPDATED=0"
+
+if /I "%~1"=="--self-updated" set "SELF_UPDATED=1"
+
+if "!SELF_UPDATED!"=="0" (
+    cls
+    call :HEADER
+    echo.
+    echo   Checking updater...
+    call :SELF_UPDATE
+    if "!SELF_UPDATE_ACTION!"=="RESTART" exit /b 0
+)
 
 set "MODE=FIRST INSTALL"
 set "HAD_ADDON=0"
@@ -38,6 +52,7 @@ if exist "%BUILD_FILE%" (
 cls
 call :HEADER
 echo.
+if "!SELF_UPDATED!"=="1" echo   UPDATER     : SELF-UPDATED SUCCESSFULLY
 echo   MODE        : !MODE!
 echo   CURRENT     : !CURRENT_SHORT!
 echo   CHANNEL     : GitHub main
@@ -55,7 +70,7 @@ if not exist "%ADDONS_DIR%" (
     goto :FAIL
 )
 
-echo   [1/5] Checking the newest build on GitHub...
+echo   [1/5] Checking the newest addon build on GitHub...
 for /f "usebackq delims=" %%S in (`powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; $r=Invoke-RestMethod -UseBasicParsing -Headers @{'User-Agent'='WeshArenaAlerts-Updater'} -Uri $env:REPO_API; Write-Output $r.sha" 2^>nul`) do set "LATEST_SHA=%%S"
 
 if not defined LATEST_SHA (
@@ -209,6 +224,47 @@ echo   ------------------------------------------------------------------------
 echo.
 pause
 exit /b 1
+
+:SELF_UPDATE
+set "SELF_UPDATE_ACTION=CONTINUE"
+set "UPDATER_REMOTE=%TEMP%\WeshArenaAlerts_Updater_latest_%RANDOM%_%RANDOM%.bat"
+set "SELF_HELPER=%TEMP%\WeshArenaAlerts_SelfUpdate_%RANDOM%_%RANDOM%.cmd"
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; Invoke-WebRequest -UseBasicParsing -Headers @{'User-Agent'='WeshArenaAlerts-Updater'} -Uri $env:SELF_UPDATE_URL -OutFile $env:UPDATER_REMOTE" >nul 2>&1
+if errorlevel 1 (
+    echo         Could not check updater version - continuing with this copy.
+    exit /b 0
+)
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$a=(Get-FileHash -Algorithm SHA256 -LiteralPath $env:SELF_PATH).Hash; $b=(Get-FileHash -Algorithm SHA256 -LiteralPath $env:UPDATER_REMOTE).Hash; if ($a -eq $b) { exit 0 } else { exit 10 }" >nul 2>&1
+set "HASH_RESULT=!ERRORLEVEL!"
+
+if "!HASH_RESULT!"=="0" (
+    del /q "%UPDATER_REMOTE%" >nul 2>&1
+    echo         Updater is current.
+    exit /b 0
+)
+
+if not "!HASH_RESULT!"=="10" (
+    del /q "%UPDATER_REMOTE%" >nul 2>&1
+    echo         Could not compare updater versions - continuing with this copy.
+    exit /b 0
+)
+
+echo         New updater found.
+echo         Updating updater and restarting...
+
+>"%SELF_HELPER%" echo @echo off
+>>"%SELF_HELPER%" echo ping 127.0.0.1 -n 2 ^>nul
+>>"%SELF_HELPER%" echo copy /y "%UPDATER_REMOTE%" "%SELF_PATH%" ^>nul
+>>"%SELF_HELPER%" echo if errorlevel 1 exit /b 1
+>>"%SELF_HELPER%" echo del /q "%UPDATER_REMOTE%" ^>nul 2^>^&1
+>>"%SELF_HELPER%" echo start "" "%SELF_PATH%" --self-updated
+>>"%SELF_HELPER%" echo del /q "%%~f0" ^>nul 2^>^&1
+
+start "" /min cmd.exe /c ""%SELF_HELPER%""
+set "SELF_UPDATE_ACTION=RESTART"
+exit /b 0
 
 :HEADER
 echo   ========================================================================
