@@ -31,7 +31,7 @@ ShieldAbsorb.AURA_POINTS_ABSORB_INDEX = AURA_POINTS_ABSORB_INDEX
 
 local function IsUsableAccessibleAmount(value)
     local ok, usable = pcall(function()
-        return type(value) == "number" and value >= 0 and value < math.huge and value == value
+        return type(value) == "number" and value > 0 and value < math.huge and value == value
     end)
     return ok and usable == true
 end
@@ -154,12 +154,13 @@ function ShieldAbsorb:ExtractAuraAbsorb(aura)
 
     local value = aura.points[AURA_POINTS_ABSORB_INDEX]
     if self:IsSecretValue(value) then
-        return { value = value, isSecret = true }
+        WAA:Debug("Shield AuraData.points[1] is secret; trying total absorb fallback")
+        return nil, "AuraData.points[1] is secret and cannot be validated"
     end
     if IsUsableAccessibleAmount(value) then
         return { value = value, isSecret = false }
     end
-    return nil, "AuraData.points[1] unusable"
+    return nil, "AuraData.points[1] missing, zero, or unusable"
 end
 
 function ShieldAbsorb:GetTotalAbsorbFallback()
@@ -176,7 +177,7 @@ function ShieldAbsorb:GetTotalAbsorbFallback()
     if IsUsableAccessibleAmount(value) then
         return { value = value, isSecret = false }
     end
-    return nil, "UnitGetTotalAbsorbs returned unusable value"
+    return nil, "UnitGetTotalAbsorbs returned zero or unusable value"
 end
 
 function ShieldAbsorb:BuildSnapshot()

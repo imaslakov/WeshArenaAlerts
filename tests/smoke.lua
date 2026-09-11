@@ -1057,6 +1057,20 @@ Fire("UNIT_AURA", "player")
 assert(namespace.ShieldAbsorb.amount == 1500)
 assert(namespace.ShieldAbsorb.amountSource == namespace.ShieldAbsorb.SOURCE_TOTAL_ABSORB)
 
+-- Anniversary may expose points[1] as a zero placeholder. Zero must not win over
+-- the working unit-total API, and two zero sources must become UNKNOWN, not "0".
+totalAbsorb = 1847
+SetAura("player", "Power Word: Shield", 25218, nil, { 0 })
+Fire("UNIT_AURA", "player")
+assert(namespace.ShieldAbsorb.state == namespace.ShieldAbsorb.STATE_KNOWN)
+assert(namespace.ShieldAbsorb.amount == 1847)
+assert(namespace.ShieldAbsorb.amountSource == namespace.ShieldAbsorb.SOURCE_TOTAL_ABSORB)
+assert(shieldFrame.value.text == "1847")
+totalAbsorb = 0
+Fire("UNIT_ABSORB_AMOUNT_CHANGED", "player")
+assert(namespace.ShieldAbsorb.state == namespace.ShieldAbsorb.STATE_UNKNOWN)
+assert(shieldFrame.value.text == "?")
+
 -- Legacy UnitAura still confirms the canonical aura, with the unit total as its
 -- only available amount source because the legacy tuple has no points payload.
 C_UnitAuras = nil
@@ -1124,6 +1138,7 @@ assert(shieldFrame.value.point[1] == "LEFT")
 
 -- A mocked secret fallback never reaches the arithmetic formatter. Supported
 -- direct FontString display retains KNOWN; a rejected direct display becomes UNKNOWN.
+local secretAuraPoint = { secret = true }
 local secretValue = { secret = true }
 namespace.ShieldAbsorb.secretValueDetector = function(value)
     return type(value) == "table" and value.secret == true
@@ -1137,7 +1152,7 @@ end
 namespace.db.modules.shieldAbsorb.numberFormat = "SHORT"
 namespace.db.modules.shieldAbsorb.displayMode = "BAR_NUMBER"
 totalAbsorb = secretValue
-SetAura("player", "Power Word: Shield", 25218, nil, nil)
+SetAura("player", "Power Word: Shield", 25218, nil, { secretAuraPoint })
 Fire("UNIT_ABSORB_AMOUNT_CHANGED", "player")
 assert(namespace.ShieldAbsorb.state == namespace.ShieldAbsorb.STATE_KNOWN)
 assert(namespace.ShieldAbsorb.amountSource == namespace.ShieldAbsorb.SOURCE_TOTAL_ABSORB)
