@@ -532,7 +532,8 @@ function Alerts:ApplyShieldLayout()
     local settings = WAA.db.modules.shieldAbsorb
     local frame = self.frames.shieldAbsorb
     local mode = settings.displayMode or "ICON_NUMBER"
-    local barWidth = 180
+    local barWidth = 150
+    local barHeight = math.max(20, settings.textSize)
 
     frame.icon:ClearAllPoints()
     frame.bar:ClearAllPoints()
@@ -540,17 +541,17 @@ function Alerts:ApplyShieldLayout()
     frame.icon:SetSize(settings.iconSize, settings.iconSize)
 
     if mode == "BAR_NUMBER" then
-        frame:SetSize(barWidth + 28, math.max(settings.textSize + 24, 58))
+        frame:SetSize(barWidth, barHeight)
         frame.icon:Hide()
-        frame.bar:SetSize(barWidth, math.max(24, settings.textSize + 8))
+        frame.bar:SetSize(barWidth, barHeight)
         frame.bar:SetPoint("CENTER", frame, "CENTER", 0, 0)
         frame.value:SetPoint("CENTER", frame.bar, "CENTER", 0, 0)
         frame.bar:Show()
     elseif mode == "ICON_BAR" then
-        frame:SetSize(settings.iconSize + barWidth + 34, math.max(settings.iconSize + 36, 58))
+        frame:SetSize(settings.iconSize + barWidth + 24, math.max(settings.iconSize, barHeight))
         frame.icon:SetPoint("LEFT", frame, "LEFT", 8, 0)
         frame.icon:Show()
-        frame.bar:SetSize(barWidth, math.max(24, settings.textSize + 8))
+        frame.bar:SetSize(barWidth, barHeight)
         frame.bar:SetPoint("LEFT", frame.icon, "RIGHT", 8, 0)
         frame.value:SetPoint("CENTER", frame.bar, "CENTER", 0, 0)
         frame.bar:Show()
@@ -571,8 +572,9 @@ function Alerts:ApplyShieldBarFill(fillFraction)
         return
     end
 
-    bar:SetValue(math.max(0, math.min(1, fillFraction)))
-    bar:SetStatusBarColor(0.2, 0.65, 1, 0.95)
+    local clamped = math.max(0, math.min(1, fillFraction))
+    bar:SetValue(clamped)
+    bar:SetStatusBarColor(1 - clamped, clamped, 0, 0.95)
 end
 
 function Alerts:ApplyShieldSettings(value, isSecret, texture, fillFraction)
