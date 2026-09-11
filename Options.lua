@@ -568,6 +568,24 @@ function Options:RegisterSlashCommand()
             WAA.db.general.debug = WAA.debugEnabled
             print("WeshArenaAlerts debug: " .. (WAA.debugEnabled and "ON" or "OFF"))
             return
+        elseif command == "log start" then
+            WAA:StartDebugLog()
+            WAA:Print("Debug log recording started; reproduce the issue, then use /waa log stop.")
+            return
+        elseif command == "log stop" then
+            WAA:StopDebugLog()
+            WAA:Print("Debug log stopped with " .. tostring(WAA:GetDebugLogEntryCount()) .. " entries. Use /reload before copying the SavedVariables file.")
+            return
+        elseif command == "log clear" then
+            WAA:ClearDebugLog()
+            WAA:Print("Debug log cleared.")
+            return
+        elseif command == "log status" or command == "log" then
+            WAA:Print(
+                "Debug log: " .. (WAA:IsDebugLogEnabled() and "RECORDING" or "stopped")
+                    .. ", entries=" .. tostring(WAA:GetDebugLogEntryCount())
+            )
+            return
         end
         self:Open()
     end

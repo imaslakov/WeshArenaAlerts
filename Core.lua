@@ -5,6 +5,7 @@ WAA.version = "0.7.0"
 WAA.isInArena = false
 WAA.isUnlocked = false
 WAA.initialized = false
+WAA.DEBUG_LOG_MAX_ENTRIES = 500
 
 local function CopyDefaults(defaults, target)
     if type(target) ~= "table" then
@@ -83,16 +84,99 @@ function WAA:IsModuleEnabled(moduleKey)
         and moduleSettings.enabled == true
 end
 
+local function IsSecretDebugValue(value)
+    if type(hasanysecretvalues) == "function" then
+        local ok, result = pcall(hasanysecretvalues, value)
+        if ok and result then
+            return true
+        end
+    end
+    if type(issecretvalue) == "function" then
+        local ok, result = pcall(issecretvalue, value)
+        if ok and result then
+            return true
+        end
+    end
+    return false
+end
+
+local function GetDebugTimestamp()
+    if type(date) == "function" then
+        local ok, timestamp = pcall(date, "%Y-%m-%d %H:%M:%S")
+        if ok and type(timestamp) == "string" then
+            return timestamp
+        end
+    end
+    if type(GetTime) == "function" then
+        local ok, elapsed = pcall(GetTime)
+        if ok and type(elapsed) == "number" then
+            return string.format("session+%.3f", elapsed)
+        end
+    end
+    return "time-unavailable"
+end
+
+function WAA:IsDebugLogEnabled()
+    return self.db
+        and self.db.debugLog
+        and self.db.debugLog.enabled == true
+end
+
+function WAA:AppendDebugLog(message)
+    if not self:IsDebugLogEnabled() then
+        return
+    end
+
+    local log = self.db.debugLog
+    if type(log.entries) ~= "table" then
+        log.entries = {}
+    end
+    log.entries[#log.entries + 1] = "[" .. GetDebugTimestamp() .. "] " .. tostring(message)
+    while #log.entries > self.DEBUG_LOG_MAX_ENTRIES do
+        table.remove(log.entries, 1)
+    end
+end
+
+function WAA:StartDebugLog()
+    self.db.debugLog.entries = {}
+    self.db.debugLog.enabled = true
+    self:AppendDebugLog("WeshArenaAlerts log started version=" .. tostring(self.version))
+end
+
+function WAA:StopDebugLog()
+    if self:IsDebugLogEnabled() then
+        self:AppendDebugLog("WeshArenaAlerts log stopped")
+    end
+    self.db.debugLog.enabled = false
+end
+
+function WAA:ClearDebugLog()
+    self.db.debugLog.entries = {}
+end
+
+function WAA:GetDebugLogEntryCount()
+    local entries = self.db and self.db.debugLog and self.db.debugLog.entries
+    return type(entries) == "table" and #entries or 0
+end
+
 function WAA:Debug(...)
-    if not self.debugEnabled then
+    local shouldPrint = self.debugEnabled == true
+    if not shouldPrint and not self:IsDebugLogEnabled() then
         return
     end
 
     local parts = {}
     for index = 1, select("#", ...) do
-        parts[index] = tostring(select(index, ...))
+        local value = select(index, ...)
+        parts[index] = IsSecretDebugValue(value) and "<secret>" or tostring(value)
     end
-    print("|cff33ff99WAA:|r " .. table.concat(parts, " "))
+    local message = table.concat(parts, " ")
+    if self:IsDebugLogEnabled() then
+        self:AppendDebugLog(message)
+    end
+    if shouldPrint then
+        print("|cff33ff99WAA:|r " .. message)
+    end
 end
 
 function WAA:Print(message)

@@ -5,6 +5,10 @@ WAA.Defaults = {
         enabled = true,
         debug = false,
     },
+    debugLog = {
+        enabled = false,
+        entries = {},
+    },
     modules = {
         drinking = {
             enabled = true,
