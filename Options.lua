@@ -316,7 +316,7 @@ function Options:BuildClassIconPage()
         db().enabled = v
         WAA.ClassIcon:OnSettingsChanged()
     end, -92)
-    self:CreateCheckbox(page, "Show border", function() return db().showBorder end, function(v)
+    self:CreateCheckbox(page, "Show class icon border", function() return db().showBorder end, function(v)
         db().showBorder = v
         WAA.ClassIcon:OnSettingsChanged()
         self:UpdateClassIconPreview()

@@ -281,7 +281,7 @@ function ClassIcon:ApplyVisualSettings(frame, anchor)
     local settings = WAA.db.modules.classIcon
     frame:SetSize(settings.iconSize, settings.iconSize)
     frame:EnableMouse(false)
-    self:SetBorderShown(frame, settings.showBorder)
+    self:SetBorderShown(frame, settings.showBorder and frame.iconKind ~= "PET")
     if anchor then
         frame:SetParent(anchor)
         if anchor.GetFrameLevel and frame.SetFrameLevel then

@@ -451,6 +451,7 @@ assert(warriorIcon.point[3] == 0 and warriorIcon.point[4] == 4)
 assert(warriorIcon.mouseEnabled == false)
 assert(warriorIcon.icon.texture == namespace.ClassIcon.CLASS_TEXTURE)
 assert(not warriorIcon.healthBar:IsShown())
+assert(warriorIcon.border.top:IsShown())
 
 -- Every TBC class has usable standard-sheet coordinates, including the local
 -- fallback path when the client global is absent.
@@ -522,6 +523,7 @@ assert(petIcon.iconKind == "PET" and petIcon.petUnit == "arenapet1")
 assert(rawget(petIcon, "classFile") == nil)
 assert(petIcon.icon.texture == "PORTRAIT:arenapet1")
 assert(petIcon.mouseEnabled == false)
+assert(not petIcon.border.top:IsShown())
 assert(petIcon.healthBar:IsShown())
 assert(petIcon.healthBar.minimum == 0 and petIcon.healthBar.maximum == 1000)
 assert(petIcon.healthBar.value == 700)
@@ -581,6 +583,7 @@ assert(fallbackPetIcon and fallbackPetIcon.iconKind == "PET")
 assert(fallbackPetIcon.petUnit == "nameplate15")
 assert(fallbackPetIcon.icon.texture == "PORTRAIT:nameplate15")
 assert(fallbackPetIcon.healthBar.value == 500)
+assert(not fallbackPetIcon.border.top:IsShown())
 
 -- A friendly party pet (including a Mage Water Elemental when exposed as
 -- partypetN) receives its own portrait and a green health bar.
@@ -598,6 +601,7 @@ assert(friendlyPetIcon and friendlyPetIcon:IsShown())
 assert(friendlyPetIcon.iconKind == "PET" and friendlyPetIcon.petRelation == "FRIENDLY")
 assert(friendlyPetIcon.petUnit == "partypet1")
 assert(friendlyPetIcon.icon.texture == "PORTRAIT:partypet1")
+assert(not friendlyPetIcon.border.top:IsShown())
 assert(friendlyPetIcon.healthBar:IsShown())
 assert(friendlyPetIcon.healthBar.value == 850 and friendlyPetIcon.healthBar.maximum == 1200)
 assert(friendlyPetIcon.healthBar.statusBarColor[2] == 0.85)
@@ -679,6 +683,8 @@ assert(not warriorIcon.border.top:IsShown())
 namespace.db.modules.classIcon.showBorder = true
 namespace.ClassIcon:OnSettingsChanged()
 assert(warriorIcon.border.top:IsShown())
+assert(not petIcon.border.top:IsShown())
+assert(not friendlyPetIcon.border.top:IsShown())
 
 -- Module/master disable clean immediately, and re-enable in an arena performs
 -- a visible-nameplate refresh without requiring reload.
