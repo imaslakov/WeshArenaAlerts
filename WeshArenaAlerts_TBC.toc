@@ -1,6 +1,6 @@
 ## Interface: 20506
 ## Title: WeshArenaAlerts
-## Notes: Arena-only alerts and enemy class icons for TBC Anniversary.
+## Notes: Arena-only alerts, class icons, and pet portraits for TBC Anniversary.
 ## Author: Wesh
 ## Version: 0.7.0
 ## SavedVariables: WeshArenaAlertsDB

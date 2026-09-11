@@ -160,6 +160,12 @@ function UnitAura(unit, index)
     if not aura then return nil end
     return aura.name, aura.texture, aura.applications, nil, nil, nil, nil, nil, nil, aura.spellID
 end
+function UnitHealth(unit)
+    return arenaUnits[unit] and arenaUnits[unit].health or nil
+end
+function UnitHealthMax(unit)
+    return arenaUnits[unit] and arenaUnits[unit].maxHealth or nil
+end
 function UnitGetTotalAbsorbs() return totalAbsorb end
 function IsInInstance() return arenaState, arenaState and "arena" or "none" end
 function CombatLogGetCurrentEventInfo() return unpackValues(cleuPayload) end
@@ -410,6 +416,8 @@ assert(namespace.Arena.eventFrame.events.COMBAT_LOG_EVENT_UNFILTERED)
 assert(namespace.Arena.eventFrame.events.UNIT_AURA)
 assert(namespace.Arena.eventFrame.events.UNIT_ABSORB_AMOUNT_CHANGED)
 assert(namespace.Arena.eventFrame.events.UNIT_SPELLCAST_SUCCEEDED)
+assert(namespace.Arena.eventFrame.events.UNIT_HEALTH)
+assert(namespace.Arena.eventFrame.events.UNIT_MAXHEALTH)
 assert(namespace.Arena:GetOpponentByGUID("Enemy-Warrior-1").classFile == "WARRIOR")
 
 -- Milestone 0.6: an already-visible mapped arena opponent is resolved during
@@ -422,6 +430,7 @@ assert(warriorIcon.point[1] == "BOTTOM" and warriorIcon.point[2] == "TOP")
 assert(warriorIcon.point[3] == 0 and warriorIcon.point[4] == 4)
 assert(warriorIcon.mouseEnabled == false)
 assert(warriorIcon.icon.texture == namespace.ClassIcon.CLASS_TEXTURE)
+assert(not warriorIcon.healthBar:IsShown())
 
 -- Every TBC class has usable standard-sheet coordinates, including the local
 -- fallback path when the client global is absent.
@@ -484,7 +493,7 @@ assert(priestFrame.icon.texCoord[1] == namespace.ClassIcon.FALLBACK_TCOORDS.ROGU
 
 -- Enemy arena pets use their own Blizzard unit portrait instead of inheriting
 -- an owner's class icon. The owner slot must itself be a mapped arena opponent.
-arenaUnits.arenapet1 = { guid = "Enemy-Pet-1", name = "ArenaPetOne" }
+arenaUnits.arenapet1 = { guid = "Enemy-Pet-1", name = "ArenaPetOne", health = 700, maxHealth = 1000 }
 SetNameplate("nameplate6", "Enemy-Pet-1")
 Fire("NAME_PLATE_UNIT_ADDED", "nameplate6")
 local petIcon = namespace.ClassIcon.activeByUnit.nameplate6
@@ -493,6 +502,55 @@ assert(petIcon.iconKind == "PET" and petIcon.petUnit == "arenapet1")
 assert(rawget(petIcon, "classFile") == nil)
 assert(petIcon.icon.texture == "PORTRAIT:arenapet1")
 assert(petIcon.mouseEnabled == false)
+assert(petIcon.healthBar:IsShown())
+assert(petIcon.healthBar.minimum == 0 and petIcon.healthBar.maximum == 1000)
+assert(petIcon.healthBar.value == 700)
+assert(petIcon.healthBar.statusBarColor[1] == 0.85)
+arenaUnits.arenapet1.health = 325
+Fire("UNIT_HEALTH", "arenapet1")
+assert(petIcon.healthBar.value == 325)
+
+-- A friendly party pet (including a Mage Water Elemental when exposed as
+-- partypetN) receives its own portrait and a green health bar.
+arenaUnits.party1 = { guid = "Friendly-Mage", name = "FrostMage" }
+arenaUnits.partypet1 = {
+    guid = "Friendly-Water-Elemental",
+    name = "Water Elemental",
+    health = 850,
+    maxHealth = 1200,
+}
+SetNameplate("nameplate11", "Friendly-Water-Elemental")
+Fire("NAME_PLATE_UNIT_ADDED", "nameplate11")
+local friendlyPetIcon = namespace.ClassIcon.activeByUnit.nameplate11
+assert(friendlyPetIcon and friendlyPetIcon:IsShown())
+assert(friendlyPetIcon.iconKind == "PET" and friendlyPetIcon.petRelation == "FRIENDLY")
+assert(friendlyPetIcon.petUnit == "partypet1")
+assert(friendlyPetIcon.icon.texture == "PORTRAIT:partypet1")
+assert(friendlyPetIcon.healthBar:IsShown())
+assert(friendlyPetIcon.healthBar.value == 850 and friendlyPetIcon.healthBar.maximum == 1200)
+assert(friendlyPetIcon.healthBar.statusBarColor[2] == 0.85)
+arenaUnits.partypet1.health = 400
+Fire("UNIT_HEALTH", "nameplate11")
+assert(friendlyPetIcon.healthBar.value == 400)
+arenaUnits.partypet1.maxHealth = 1500
+Fire("UNIT_MAXHEALTH", "partypet1")
+assert(friendlyPetIcon.healthBar.maximum == 1500)
+
+-- A newly summoned friendly pet is picked up by UNIT_PET even when its
+-- nameplate arrived before the partypet token became available.
+arenaUnits.party2 = { guid = "Friendly-Mage-Two", name = "SecondMage" }
+SetNameplate("nameplate12", "Friendly-Water-Elemental-Late")
+Fire("NAME_PLATE_UNIT_ADDED", "nameplate12")
+assert(not namespace.ClassIcon.activeByUnit.nameplate12)
+arenaUnits.partypet2 = {
+    guid = "Friendly-Water-Elemental-Late",
+    name = "Water Elemental",
+    health = 600,
+    maxHealth = 900,
+}
+Fire("UNIT_PET", "party2")
+assert(namespace.ClassIcon.activeByUnit.nameplate12.petUnit == "partypet2")
+assert(namespace.ClassIcon.activeByUnit.nameplate12.healthBar.value == 600)
 
 -- The physical Blizzard nameplate frame can be recycled under a different
 -- nameplate token. Its former Warrior visual is released before the pet portrait
@@ -616,6 +674,8 @@ assert(not next(namespace.ClassIcon.activeByUnit))
 assert(not namespace.Arena.eventFrame.events.NAME_PLATE_UNIT_ADDED)
 assert(not namespace.Arena.eventFrame.events.NAME_PLATE_UNIT_REMOVED)
 assert(not namespace.Arena.eventFrame.events.UNIT_PET)
+assert(not namespace.Arena.eventFrame.events.UNIT_HEALTH)
+assert(not namespace.Arena.eventFrame.events.UNIT_MAXHEALTH)
 assert(namespace.Options.classIconPreview.iconFrame:IsShown())
 Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
 assert(not next(namespace.ClassIcon.activeByUnit))
@@ -624,6 +684,8 @@ namespace.Arena:UpdateArenaState()
 assert(namespace.Arena.eventFrame.events.NAME_PLATE_UNIT_ADDED)
 assert(namespace.Arena.eventFrame.events.NAME_PLATE_UNIT_REMOVED)
 assert(namespace.Arena.eventFrame.events.UNIT_PET)
+assert(namespace.Arena.eventFrame.events.UNIT_HEALTH)
+assert(namespace.Arena.eventFrame.events.UNIT_MAXHEALTH)
 assert(namespace.ClassIcon.activeByUnit.nameplate1)
 
 -- Milestone 0.5: the player aura is the only source of truth for the persistent
@@ -1538,6 +1600,8 @@ assert(not namespace.Arena:GetOpponentByGUID("Enemy-Warrior-1"))
 assert(not namespace.Arena.eventFrame.events.COMBAT_LOG_EVENT_UNFILTERED)
 assert(not namespace.Arena.eventFrame.events.UNIT_AURA)
 assert(not namespace.Arena.eventFrame.events.UNIT_SPELLCAST_SUCCEEDED)
+assert(not namespace.Arena.eventFrame.events.UNIT_HEALTH)
+assert(not namespace.Arena.eventFrame.events.UNIT_MAXHEALTH)
 assert(namespace.Alerts.frames.enemyOverpower.scripts.OnUpdate == nil)
 
 -- 12 and manual-preview compatibility: detector input outside arena is ignored,

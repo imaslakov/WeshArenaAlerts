@@ -8,7 +8,7 @@ local NAV_ITEMS = {
     { key = "drinking", label = "Drinking" },
     { key = "scatter", label = "Scatter" },
     { key = "innerFire", label = "Inner Fire" },
-    { key = "classIcon", label = "Enemy Class Icon" },
+    { key = "classIcon", label = "Class / Pet Icons" },
     { key = "shieldAbsorb", label = "Shield Absorb" },
     { key = "enemyOverpower", label = "Enemy Overpower" },
 }
@@ -308,8 +308,8 @@ end
 function Options:BuildClassIconPage()
     local page = self:CreatePage(
         "classIcon",
-        "Enemy Class Icon",
-        "Shows a large class icon above each visible nameplate whose GUID matches a mapped arena opponent. The sample below is preview-only."
+        "Class / Pet Icons",
+        "Shows class icons for mapped arena opponents and portraits with health bars for mapped enemy or friendly pets. The sample below is preview-only."
     )
     local db = function() return WAA.db.modules.classIcon end
     self:CreateCheckbox(page, "Enabled", function() return db().enabled end, function(v)
