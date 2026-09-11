@@ -57,6 +57,7 @@ function ClassIcon:Initialize()
     self.activeByUnit = {}
     self.activeByGUID = {}
     self.activeByNamePlate = {}
+    self.activeByAnchor = {}
     self.activeByPetUnit = {}
     self.visibleUnits = {}
     self.pendingByUnit = {}
@@ -193,7 +194,7 @@ function ClassIcon:GetFriendlyPetByGUID(guid)
     return nil
 end
 
-function ClassIcon:GetPetByGUID(guid)
+function ClassIcon:GetPetByGUID(guid, unitToken)
     local petUnit = self:GetArenaPetByGUID(guid)
     if petUnit then
         return petUnit, "ENEMY"
@@ -201,6 +202,15 @@ function ClassIcon:GetPetByGUID(guid)
     petUnit = self:GetFriendlyPetByGUID(guid)
     if petUnit then
         return petUnit, "FRIENDLY"
+    end
+
+    if type(guid) == "string" and guid:match("^Pet%-") then
+        local playerControlled = type(UnitPlayerControlled) ~= "function"
+            or UnitPlayerControlled(unitToken) == true
+        if playerControlled then
+            local friendly = type(UnitIsFriend) == "function" and UnitIsFriend("player", unitToken) == true
+            return unitToken, friendly and "FRIENDLY" or "ENEMY"
+        end
     end
     return nil, nil
 end
@@ -309,6 +319,9 @@ function ClassIcon:ReleaseFrame(frame)
     if frame.namePlate and self.activeByNamePlate[frame.namePlate] == frame then
         self.activeByNamePlate[frame.namePlate] = nil
     end
+    if frame.anchor and self.activeByAnchor[frame.anchor] == frame then
+        self.activeByAnchor[frame.anchor] = nil
+    end
     if frame.petUnit and self.activeByPetUnit[frame.petUnit] == frame then
         self.activeByPetUnit[frame.petUnit] = nil
     end
@@ -359,18 +372,6 @@ function ClassIcon:ShowForUnit(unitToken, refreshReason)
         return false
     end
     local namePlate = C_NamePlate.GetNamePlateForUnit(unitToken)
-    local staleNamePlateFrame = namePlate and self.activeByNamePlate[namePlate]
-    if staleNamePlateFrame
-        and (staleNamePlateFrame.unitToken ~= unitToken or staleNamePlateFrame.guid ~= guid)
-    then
-        WAA:Debug(
-            "ClassIcon recycled nameplate cleanup:",
-            tostring(staleNamePlateFrame.unitToken),
-            "->",
-            unitToken
-        )
-        self:ReleaseFrame(staleNamePlateFrame)
-    end
     local anchor = self:ResolveNamePlateAnchor(namePlate)
     if not anchor then
         self:ReleaseUnit(unitToken)
@@ -378,12 +379,24 @@ function ClassIcon:ShowForUnit(unitToken, refreshReason)
         return false
     end
 
-
-    local opponent = WAA.Arena:GetOpponentByGUID(guid)
-    local petUnit, petRelation
-    if not opponent then
-        petUnit, petRelation = self:GetPetByGUID(guid)
+    local staleFrame = self.activeByNamePlate[namePlate] or self.activeByAnchor[anchor]
+    if staleFrame and (staleFrame.unitToken ~= unitToken or staleFrame.guid ~= guid) then
+        WAA:Debug(
+            "ClassIcon recycled nameplate cleanup:",
+            tostring(staleFrame.unitToken),
+            "->",
+            unitToken
+        )
+        self:ReleaseFrame(staleFrame)
     end
+
+    local petUnit, petRelation = self:GetPetByGUID(guid, unitToken)
+    local explicitlyNotPlayer = false
+    if type(UnitIsPlayer) == "function" then
+        local ok, isPlayer = pcall(UnitIsPlayer, unitToken)
+        explicitlyNotPlayer = ok and isPlayer == false
+    end
+    local opponent = not petUnit and not explicitlyNotPlayer and WAA.Arena:GetOpponentByGUID(guid) or nil
     if not opponent and not petUnit then
         self:ReleaseUnit(unitToken)
         self.pendingByUnit[unitToken] = guid
@@ -434,6 +447,7 @@ function ClassIcon:ShowForUnit(unitToken, refreshReason)
     self.activeByUnit[unitToken] = frame
     self.activeByGUID[guid] = frame
     self.activeByNamePlate[namePlate] = frame
+    self.activeByAnchor[anchor] = frame
     if petUnit then
         self.activeByPetUnit[petUnit] = frame
     end
@@ -560,6 +574,7 @@ function ClassIcon:ClearRuntime()
     wipe(self.activeByUnit or {})
     wipe(self.activeByGUID or {})
     wipe(self.activeByNamePlate or {})
+    wipe(self.activeByAnchor or {})
     wipe(self.activeByPetUnit or {})
     wipe(self.visibleUnits or {})
     wipe(self.pendingByUnit or {})

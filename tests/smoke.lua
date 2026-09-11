@@ -160,11 +160,24 @@ function UnitAura(unit, index)
     if not aura then return nil end
     return aura.name, aura.texture, aura.applications, nil, nil, nil, nil, nil, nil, aura.spellID
 end
+function UnitIsPlayer(unit)
+    local metadata = nameplateUnits[unit]
+    return metadata and metadata.isPlayer
+end
+function UnitPlayerControlled(unit)
+    local metadata = nameplateUnits[unit]
+    return metadata and metadata.playerControlled
+end
+function UnitIsFriend(_, unit)
+    return nameplateUnits[unit] and nameplateUnits[unit].friendly or false
+end
 function UnitHealth(unit)
-    return arenaUnits[unit] and arenaUnits[unit].health or nil
+    local metadata = arenaUnits[unit] or nameplateUnits[unit]
+    return metadata and metadata.health or nil
 end
 function UnitHealthMax(unit)
-    return arenaUnits[unit] and arenaUnits[unit].maxHealth or nil
+    local metadata = arenaUnits[unit] or nameplateUnits[unit]
+    return metadata and metadata.maxHealth or nil
 end
 function UnitGetTotalAbsorbs() return totalAbsorb end
 function IsInInstance() return arenaState, arenaState and "arena" or "none" end
@@ -332,7 +345,7 @@ local function UseModernAuras()
     }
 end
 
-local function SetNameplate(unitToken, guid, useUnitFrameToken)
+local function SetNameplate(unitToken, guid, useUnitFrameToken, traits)
     local namePlate = NewObject()
     namePlate.UnitFrame = NewObject()
     if useUnitFrameToken then
@@ -343,7 +356,14 @@ local function SetNameplate(unitToken, guid, useUnitFrameToken)
         namePlate.namePlateUnitToken = unitToken
     end
     nameplates[unitToken] = namePlate
-    nameplateUnits[unitToken] = { guid = guid }
+    nameplateUnits[unitToken] = {
+        guid = guid,
+        isPlayer = traits and traits.isPlayer,
+        playerControlled = traits and traits.playerControlled,
+        friendly = traits and traits.friendly or false,
+        health = traits and traits.health or nil,
+        maxHealth = traits and traits.maxHealth or nil,
+    }
     return namePlate
 end
 
@@ -510,6 +530,58 @@ arenaUnits.arenapet1.health = 325
 Fire("UNIT_HEALTH", "arenapet1")
 assert(petIcon.healthBar.value == 325)
 
+-- Pet identity wins even if an inconsistent arena GUID map would otherwise
+-- suggest the owner's WARLOCK class. An explicitly non-player unit can never
+-- receive a class texture.
+local felhunterGUID = "Pet-0-Enemy-Felhunter"
+arenaUnits.arenapet5 = { guid = felhunterGUID, name = "Felhunter", health = 900, maxHealth = 1100 }
+namespace.Arena.opponentsByGUID[felhunterGUID] = { unit = "arena5", guid = felhunterGUID, classFile = "WARLOCK" }
+SetNameplate("nameplate13", felhunterGUID, false, {
+    isPlayer = false,
+    playerControlled = true,
+    friendly = false,
+})
+Fire("NAME_PLATE_UNIT_ADDED", "nameplate13")
+local felhunterIcon = namespace.ClassIcon.activeByUnit.nameplate13
+assert(felhunterIcon and felhunterIcon.iconKind == "PET")
+assert(felhunterIcon.petUnit == "arenapet5")
+assert(rawget(felhunterIcon, "classFile") == nil)
+assert(felhunterIcon.icon.texture == "PORTRAIT:arenapet5")
+namespace.Arena.opponentsByGUID[felhunterGUID] = nil
+RemoveNameplate("nameplate13")
+
+local nonPlayerGUID = "Creature-Explicit-Non-Player"
+namespace.Arena.opponentsByGUID[nonPlayerGUID] = {
+    unit = "arena5",
+    guid = nonPlayerGUID,
+    classFile = "WARLOCK",
+}
+SetNameplate("nameplate14", nonPlayerGUID, false, {
+    isPlayer = false,
+    playerControlled = true,
+    friendly = false,
+})
+Fire("NAME_PLATE_UNIT_ADDED", "nameplate14")
+assert(not namespace.ClassIcon.activeByUnit.nameplate14)
+namespace.Arena.opponentsByGUID[nonPlayerGUID] = nil
+RemoveNameplate("nameplate14")
+
+-- A real Pet GUID still receives its own portrait when arenapetN is temporarily
+-- unavailable; the visible nameplate token becomes the portrait/health source.
+SetNameplate("nameplate15", "Pet-0-Enemy-Fallback", false, {
+    isPlayer = false,
+    playerControlled = true,
+    friendly = false,
+    health = 500,
+    maxHealth = 800,
+})
+Fire("NAME_PLATE_UNIT_ADDED", "nameplate15")
+local fallbackPetIcon = namespace.ClassIcon.activeByUnit.nameplate15
+assert(fallbackPetIcon and fallbackPetIcon.iconKind == "PET")
+assert(fallbackPetIcon.petUnit == "nameplate15")
+assert(fallbackPetIcon.icon.texture == "PORTRAIT:nameplate15")
+assert(fallbackPetIcon.healthBar.value == 500)
+
 -- A friendly party pet (including a Mage Water Elemental when exposed as
 -- partypetN) receives its own portrait and a green health bar.
 arenaUnits.party1 = { guid = "Friendly-Mage", name = "FrostMage" }
@@ -561,8 +633,10 @@ local recycledFrame = namespace.ClassIcon.activeByUnit.nameplate7
 assert(recycledFrame and recycledFrame.classFile == "WARRIOR")
 nameplates.nameplate7 = nil
 nameplateUnits.nameplate7 = nil
-recycledPlate.namePlateUnitToken = "nameplate8"
-nameplates.nameplate8 = recycledPlate
+local recycledWrapper = NewObject()
+recycledWrapper.UnitFrame = recycledPlate.UnitFrame
+recycledWrapper.namePlateUnitToken = "nameplate8"
+nameplates.nameplate8 = recycledWrapper
 nameplateUnits.nameplate8 = { guid = "Enemy-Pet-2" }
 arenaUnits.arenapet2 = { guid = "Enemy-Pet-2", name = "ArenaPetTwo" }
 Fire("NAME_PLATE_UNIT_ADDED", "nameplate8")
