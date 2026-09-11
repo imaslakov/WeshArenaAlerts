@@ -36,6 +36,7 @@ WAA.Defaults = {
             iconSize = 72,
             textSize = 28,
             numberFormat = "EXACT",
+            displayMode = "ICON_NUMBER",
         },
         enemyOverpower = {
             enabled = true,

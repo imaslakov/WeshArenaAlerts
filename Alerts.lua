@@ -167,13 +167,34 @@ function Alerts:CreateInnerFireFrame()
 end
 
 function Alerts:CreateShieldFrame()
-    local frame = self:CreateMovableFrame("shieldAbsorb", 150, 116)
+    local frame = self:CreateMovableFrame("shieldAbsorb", 220, 116)
     local icon = self:CreateIcon(frame, "shieldAbsorb")
     icon:SetPoint("LEFT", frame, "LEFT", 8, 0)
-    local value = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
+
+    local bar = CreateFrame("StatusBar", nil, frame)
+    bar:SetFrameLevel(frame:GetFrameLevel() + 1)
+    bar:SetSize(180, 24)
+    bar:SetMinMaxValues(0, 1)
+    bar:SetValue(0)
+    bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
+    bar:SetStatusBarColor(0.2, 0.65, 1, 0.95)
+    local background = bar:CreateTexture(nil, "BACKGROUND")
+    background:SetAllPoints()
+    background:SetColorTexture(0.025, 0.08, 0.13, 0.9)
+    bar.background = background
+    frame.bar = bar
+
+    local textLayer = CreateFrame("Frame", nil, frame)
+    textLayer:SetAllPoints(frame)
+    textLayer:SetFrameLevel(frame:GetFrameLevel() + 2)
+    textLayer:EnableMouse(false)
+    frame.textLayer = textLayer
+
+    local value = textLayer:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
     value:SetPoint("LEFT", icon, "RIGHT", 7, 0)
     value:SetText("1847")
-    value:SetTextColor(0.5, 0.85, 1)
+    value:SetTextColor(0.75, 0.92, 1)
+    value:SetShadowOffset(1, -1)
     frame.value = value
 end
 
@@ -507,13 +528,60 @@ function Alerts:TrySetShieldValue(value, isSecret)
     return true
 end
 
-function Alerts:ApplyShieldSettings(value, isSecret, texture)
+function Alerts:ApplyShieldLayout()
     local settings = WAA.db.modules.shieldAbsorb
     local frame = self.frames.shieldAbsorb
-    frame:SetSize(settings.iconSize + 86, settings.iconSize + 36)
+    local mode = settings.displayMode or "ICON_NUMBER"
+    local barWidth = 180
+
+    frame.icon:ClearAllPoints()
+    frame.bar:ClearAllPoints()
+    frame.value:ClearAllPoints()
     frame.icon:SetSize(settings.iconSize, settings.iconSize)
+
+    if mode == "BAR_NUMBER" then
+        frame:SetSize(barWidth + 28, math.max(settings.textSize + 24, 58))
+        frame.icon:Hide()
+        frame.bar:SetSize(barWidth, math.max(24, settings.textSize + 8))
+        frame.bar:SetPoint("CENTER", frame, "CENTER", 0, 0)
+        frame.value:SetPoint("CENTER", frame.bar, "CENTER", 0, 0)
+        frame.bar:Show()
+    elseif mode == "ICON_BAR" then
+        frame:SetSize(settings.iconSize + barWidth + 34, math.max(settings.iconSize + 36, 58))
+        frame.icon:SetPoint("LEFT", frame, "LEFT", 8, 0)
+        frame.icon:Show()
+        frame.bar:SetSize(barWidth, math.max(24, settings.textSize + 8))
+        frame.bar:SetPoint("LEFT", frame.icon, "RIGHT", 8, 0)
+        frame.value:SetPoint("CENTER", frame.bar, "CENTER", 0, 0)
+        frame.bar:Show()
+    else
+        frame:SetSize(settings.iconSize + 86, settings.iconSize + 36)
+        frame.icon:SetPoint("LEFT", frame, "LEFT", 8, 0)
+        frame.icon:Show()
+        frame.value:SetPoint("LEFT", frame.icon, "RIGHT", 7, 0)
+        frame.bar:Hide()
+    end
+end
+
+function Alerts:ApplyShieldBarFill(fillFraction)
+    local bar = self.frames.shieldAbsorb.bar
+    if type(fillFraction) ~= "number" then
+        bar:SetValue(0)
+        bar:SetStatusBarColor(0.28, 0.38, 0.46, 0.75)
+        return
+    end
+
+    bar:SetValue(math.max(0, math.min(1, fillFraction)))
+    bar:SetStatusBarColor(0.2, 0.65, 1, 0.95)
+end
+
+function Alerts:ApplyShieldSettings(value, isSecret, texture, fillFraction)
+    local settings = WAA.db.modules.shieldAbsorb
+    local frame = self.frames.shieldAbsorb
+    self:ApplyShieldLayout()
     frame.icon:SetTexture(texture or GetSpellIcon(SPELLS.shieldAbsorb, FALLBACK_ICONS.shieldAbsorb))
     SetFontSize(frame.value, settings.textSize)
+    self:ApplyShieldBarFill(fillFraction)
     return self:TrySetShieldValue(value, isSecret)
 end
 
@@ -521,7 +589,7 @@ function Alerts:ShowShieldPreview(persistent)
     local frame = self.frames.shieldAbsorb
     local token = self:CancelHide("shieldAbsorb")
     self.shieldDisplayMode = "preview"
-    self:ApplyShieldSettings(1847, false)
+    self:ApplyShieldSettings(1847, false, nil, 1847 / 2500)
     frame:Show()
     if persistent then
         return
@@ -542,11 +610,11 @@ end
 
 function Alerts:RefreshShieldPreview()
     if self.shieldDisplayMode == "preview" then
-        self:ApplyShieldSettings(1847, false)
+        self:ApplyShieldSettings(1847, false, nil, 1847 / 2500)
     end
 end
 
-function Alerts:ShowShieldRuntime(value, isSecret, texture)
+function Alerts:ShowShieldRuntime(value, isSecret, texture, fillFraction)
     self.shieldRuntimeActive = true
     if self.positioningMode or self.shieldDisplayMode == "preview" then
         return true
@@ -555,7 +623,7 @@ function Alerts:ShowShieldRuntime(value, isSecret, texture)
     local frame = self.frames.shieldAbsorb
     self:CancelHide("shieldAbsorb")
     self.shieldDisplayMode = "runtime"
-    local displayed = self:ApplyShieldSettings(value, isSecret, texture)
+    local displayed = self:ApplyShieldSettings(value, isSecret, texture, fillFraction)
     if not displayed then
         return false
     end
@@ -699,8 +767,7 @@ function Alerts:HideAll()
 end
 
 function Alerts:ClearRuntime()
-    self.positioningMode = false
-    WAA.isUnlocked = false
+    local keepPositioningMode = WAA.isUnlocked == true
     self:HideAll()
     self.drinkingRuntimeActive = false
     self.drinkingDisplayMode = nil
@@ -711,6 +778,13 @@ function Alerts:ClearRuntime()
     self.overpowerRuntimeActive = false
     self.overpowerDisplayMode = nil
     self.scatterDisplayMode = nil
+
+    if keepPositioningMode then
+        self:UnlockFrames()
+        return
+    end
+
+    self.positioningMode = false
     for _, key in ipairs(POSITION_KEYS) do
         self:SetPositioningStyle(self.frames[key], false)
     end

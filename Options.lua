@@ -103,6 +103,11 @@ function Options:CreatePanel()
     panel:SetScript("OnShow", function()
         self:Refresh()
     end)
+    panel:SetScript("OnHide", function()
+        if WAA.isUnlocked then
+            WAA.Alerts:UnlockFrames()
+        end
+    end)
 end
 
 function Options:CreatePage(key, titleText, description)
@@ -264,7 +269,7 @@ function Options:BuildGeneralPage()
     heading:SetPoint("TOPLEFT", 24, -150)
     heading:SetTextColor(1, 0.82, 0.25)
 
-    local help = CreateLabel(page, "Unlock shows the four positionable alerts. Drag each frame independently, then lock to save a clean screen.", "GameFontHighlightSmall")
+    local help = CreateLabel(page, "Unlock shows the four positionable alerts. They remain movable after Settings is closed; drag each frame independently, then lock to save a clean screen.", "GameFontHighlightSmall")
     help:SetPoint("TOPLEFT", heading, "BOTTOMLEFT", 0, -7)
     help:SetPoint("RIGHT", page, "RIGHT", -24, 0)
     help:SetWordWrap(true)
@@ -457,7 +462,17 @@ function Options:BuildShieldPage()
         WAA.Alerts:RefreshShieldPreview()
         self:RefreshPositioningPreview("shieldAbsorb")
     end, -294)
-    self:CreateTestArea(page, function() WAA.Alerts:ShowShieldPreview() end, -381)
+    self:CreateChoice(page, "Display style", {
+        { label = "Icon + Number", value = "ICON_NUMBER" },
+        { label = "Bar + Number", value = "BAR_NUMBER" },
+        { label = "Icon + Bar", value = "ICON_BAR" },
+    }, function() return db().displayMode end, function(v)
+        db().displayMode = v
+        WAA.ShieldAbsorb:OnSettingsChanged()
+        WAA.Alerts:RefreshShieldPreview()
+        self:RefreshPositioningPreview("shieldAbsorb")
+    end, -366)
+    self:CreateTestArea(page, function() WAA.Alerts:ShowShieldPreview() end, -453)
 end
 
 function Options:BuildOverpowerPage()

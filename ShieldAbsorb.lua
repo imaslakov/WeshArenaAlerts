@@ -67,6 +67,8 @@ function ShieldAbsorb:ResetState()
     self.amount = nil
     self.amountIsSecret = false
     self.amountSource = nil
+    self.observedMaximum = nil
+    self.fillFraction = nil
 end
 
 function ShieldAbsorb:IsRuntimeEligible()
@@ -231,6 +233,8 @@ function ShieldAbsorb:ApplySnapshot(snapshot)
     local oldAmountIsSecret = self.amountIsSecret
     local oldAmountSource = self.amountSource
     local oldSpellID = self.spellID
+    local oldAuraInstanceID = self.auraInstanceID
+    local oldFillFraction = self.fillFraction
     local oldPresent = self.isPresent
 
     if snapshot.isPresent and (not oldPresent or oldSpellID ~= snapshot.spellID) then
@@ -248,6 +252,28 @@ function ShieldAbsorb:ApplySnapshot(snapshot)
         end
     end
 
+    local observedMaximum = self.observedMaximum
+    local fillFraction
+    if not snapshot.isPresent then
+        observedMaximum = nil
+    elseif snapshot.state == self.STATE_KNOWN and not snapshot.amountIsSecret then
+        local auraChanged = snapshot.auraInstanceID ~= oldAuraInstanceID
+            and (snapshot.auraInstanceID ~= nil or oldAuraInstanceID ~= nil)
+        if not oldPresent or auraChanged or type(observedMaximum) ~= "number" then
+            observedMaximum = snapshot.amount
+            WAA:Debug("Shield bar baseline initialized:", tostring(observedMaximum))
+        elseif snapshot.amount > observedMaximum then
+            observedMaximum = snapshot.amount
+            WAA:Debug("Shield bar baseline updated:", tostring(observedMaximum))
+        end
+
+        if observedMaximum > 0 then
+            fillFraction = snapshot.amount / observedMaximum
+        else
+            fillFraction = 0
+        end
+    end
+
     self.state = snapshot.state
     self.isPresent = snapshot.isPresent
     self.spellID = snapshot.spellID
@@ -256,6 +282,8 @@ function ShieldAbsorb:ApplySnapshot(snapshot)
     self.amount = snapshot.amount
     self.amountIsSecret = snapshot.amountIsSecret == true
     self.amountSource = snapshot.amountSource
+    self.observedMaximum = observedMaximum
+    self.fillFraction = fillFraction
 
     if oldState ~= self.state then
         WAA:Debug("Shield state:", tostring(oldState or "NONE") .. " -> " .. tostring(self.state))
@@ -269,8 +297,10 @@ function ShieldAbsorb:ApplySnapshot(snapshot)
 
     local changed = oldState ~= self.state
         or oldSpellID ~= self.spellID
+        or oldAuraInstanceID ~= self.auraInstanceID
         or amountChanged
         or oldAmountSource ~= self.amountSource
+        or oldFillFraction ~= self.fillFraction
     if changed then
         self:RefreshVisual()
     end
@@ -283,11 +313,12 @@ function ShieldAbsorb:MarkSecretDisplayUnavailable()
     self.amount = nil
     self.amountIsSecret = false
     self.amountSource = self.SOURCE_UNKNOWN
+    self.fillFraction = nil
     WAA:Debug("Shield amount unavailable: secret value cannot be displayed safely")
     if oldState ~= self.state then
         WAA:Debug("Shield state:", tostring(oldState) .. " -> " .. self.state)
     end
-    WAA.Alerts:ShowShieldRuntime(nil, false, self.texture)
+    WAA.Alerts:ShowShieldRuntime(nil, false, self.texture, nil)
 end
 
 function ShieldAbsorb:ScanPlayer(reason)
@@ -307,14 +338,19 @@ function ShieldAbsorb:RefreshVisual()
         return
     end
     if self.state == self.STATE_KNOWN then
-        local displayed = WAA.Alerts:ShowShieldRuntime(self.amount, self.amountIsSecret, self.texture)
+        local displayed = WAA.Alerts:ShowShieldRuntime(
+            self.amount,
+            self.amountIsSecret,
+            self.texture,
+            self.fillFraction
+        )
         if not displayed and self.amountIsSecret then
             self:MarkSecretDisplayUnavailable()
         elseif displayed and self.amountIsSecret then
             WAA:Debug("Shield secret value displayed without arithmetic")
         end
     elseif self.state == self.STATE_UNKNOWN then
-        WAA.Alerts:ShowShieldRuntime(nil, false, self.texture)
+        WAA.Alerts:ShowShieldRuntime(nil, false, self.texture, nil)
     else
         WAA.Alerts:HideShieldRuntime()
     end

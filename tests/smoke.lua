@@ -36,6 +36,8 @@ function Object:CreateTexture() return NewObject() end
 function Object:CreateFontString() return NewObject() end
 function Object:GetFont() return "mock-font", 12, "" end
 function Object:SetFont(font, size, flags) self.font, self.fontSize, self.fontFlags = font, size, flags end
+function Object:GetFrameLevel() return rawget(self, "frameLevel") or 0 end
+function Object:SetFrameLevel(level) self.frameLevel = level end
 function Object:SetPoint(point, _, relativePoint, x, y)
     self.point = { point, relativePoint or point, x or 0, y or 0 }
 end
@@ -71,9 +73,13 @@ function Object:IsShown() return self.shown end
 function Object:SetAlpha(value) self.alpha = value end
 function Object:SetSize(width, height) self.width, self.height = width, height end
 function Object:EnableMouse(value) self.mouseEnabled = value end
+function Object:StartMoving() self.moving = true end
+function Object:StopMovingOrSizing() self.moving = false end
 function Object:SetParent(parent) self.parent = parent end
 function Object:GetParent() return self.parent end
 function Object:SetTexture(texture) self.texture = texture end
+function Object:SetStatusBarTexture(texture) self.statusBarTexture = texture end
+function Object:SetStatusBarColor(...) self.statusBarColor = { ... } end
 function Object:SetTexCoord(...) self.texCoord = { ... } end
 function Object:SetColorTexture(...) self.colorTexture = { ... } end
 function Object:LockHighlight() self.highlighted = true end
@@ -357,12 +363,27 @@ assert(namespace.InnerFire.INNER_FIRE_SPELL_IDS[588])
 assert(namespace.InnerFire.INNER_FIRE_SPELL_IDS[25431])
 assert(namespace.ShieldAbsorb.POWER_WORD_SHIELD_SPELL_IDS[17])
 assert(namespace.ShieldAbsorb.POWER_WORD_SHIELD_SPELL_IDS[25218])
+assert(namespace.db.modules.shieldAbsorb.displayMode == "ICON_NUMBER")
 assert(namespace.Alerts.frames.scatter.mouseEnabled == false)
 assert(namespace.db.modules.enemyOverpower.showCountdown)
 assert(namespace.Options.category:GetID() == 77)
 assert(type(SlashCmdList.WESHARENAALERTS) == "function")
 namespace.Alerts:TestAll()
 namespace.Alerts:UnlockFrames()
+namespace.Alerts:ClearRuntime()
+assert(namespace.isUnlocked)
+assert(namespace.Alerts.positioningMode)
+for _, key in ipairs({ "drinking", "innerFire", "shieldAbsorb", "enemyOverpower" }) do
+    assert(namespace.Alerts.frames[key]:IsShown())
+    assert(namespace.Alerts.frames[key].mouseEnabled)
+end
+namespace.Options.panel.scripts.OnHide()
+assert(namespace.isUnlocked and namespace.Alerts.positioningMode)
+local movableFrame = namespace.Alerts.frames.drinking
+movableFrame.scripts.OnDragStart(movableFrame)
+assert(movableFrame.moving)
+movableFrame.scripts.OnDragStop(movableFrame)
+assert(not movableFrame.moving)
 namespace.Alerts:LockFrames()
 namespace:ResetPositions()
 SlashCmdList.WESHARENAALERTS("")
@@ -760,6 +781,8 @@ SetAura("player", "Power Word: Shield", 25218, nil, { 1847 }, "PWSTexture", 101)
 Fire("UNIT_AURA", "player")
 assert(namespace.ShieldAbsorb.state == namespace.ShieldAbsorb.STATE_KNOWN)
 assert(namespace.ShieldAbsorb.amount == 1847)
+assert(namespace.ShieldAbsorb.observedMaximum == 1847)
+assert(namespace.ShieldAbsorb.fillFraction == 1)
 assert(namespace.ShieldAbsorb.amountSource == namespace.ShieldAbsorb.SOURCE_AURA_POINTS)
 assert(namespace.ShieldAbsorb.spellID == 25218 and namespace.ShieldAbsorb.auraInstanceID == 101)
 assert(namespace.Alerts.frames.shieldAbsorb:IsShown())
@@ -771,11 +794,19 @@ local shieldShowCount = shieldFrame.showCount
 SetAura("player", "Power Word: Shield", 25218, nil, { 1320 }, "PWSTexture", 101)
 Fire("UNIT_ABSORB_AMOUNT_CHANGED", "player")
 assert(namespace.ShieldAbsorb.amount == 1320 and shieldFrame.value.text == "1320")
+assert(math.abs(namespace.ShieldAbsorb.fillFraction - (1320 / 1847)) < 0.0001)
+assert(math.abs(shieldFrame.bar.value - (1320 / 1847)) < 0.0001)
 assert(shieldFrame.showCount == shieldShowCount)
 SetAura("player", "Power Word: Shield", 25218, nil, { 215 }, "PWSTexture", 101)
 Fire("UNIT_ABSORB_AMOUNT_CHANGED", "player")
 assert(namespace.ShieldAbsorb.amount == 215 and shieldFrame.value.text == "215")
+assert(math.abs(namespace.ShieldAbsorb.fillFraction - (215 / 1847)) < 0.0001)
 assert(shieldFrame.showCount == shieldShowCount)
+SetAura("player", "Power Word: Shield", 25218, nil, { 1200 }, "PWSTexture", 102)
+Fire("UNIT_AURA", "player")
+assert(namespace.ShieldAbsorb.observedMaximum == 1200)
+assert(namespace.ShieldAbsorb.fillFraction == 1)
+assert(shieldFrame.value.text == "1200")
 
 -- Removal and dispel both converge on the aura-absent transition. A recast uses
 -- the new API value and aura instance rather than a reconstructed maximum.
@@ -866,6 +897,22 @@ assert(shieldFrame.value.text == "963")
 assert(shieldFrame.icon.width == 96, "shield icon width=" .. tostring(shieldFrame.icon.width))
 assert(shieldFrame.value.fontSize == 34)
 
+-- Display variants switch live on the same saved-position frame. The bar uses
+-- the highest accessible API amount observed for the current aura as its scale.
+namespace.db.modules.shieldAbsorb.displayMode = "BAR_NUMBER"
+namespace.ShieldAbsorb:OnSettingsChanged()
+assert(not shieldFrame.icon:IsShown() and shieldFrame.bar:IsShown())
+assert(shieldFrame.value.text == "963")
+assert(math.abs(shieldFrame.bar.value - (963 / 1847)) < 0.0001)
+namespace.db.modules.shieldAbsorb.displayMode = "ICON_BAR"
+namespace.ShieldAbsorb:OnSettingsChanged()
+assert(shieldFrame.icon:IsShown() and shieldFrame.bar:IsShown())
+assert(shieldFrame.value.point[1] == "CENTER")
+namespace.db.modules.shieldAbsorb.displayMode = "ICON_NUMBER"
+namespace.ShieldAbsorb:OnSettingsChanged()
+assert(shieldFrame.icon:IsShown() and not shieldFrame.bar:IsShown())
+assert(shieldFrame.value.point[1] == "LEFT")
+
 -- A mocked secret fallback never reaches the arithmetic formatter. Supported
 -- direct FontString display retains KNOWN; a rejected direct display becomes UNKNOWN.
 local secretValue = { secret = true }
@@ -879,6 +926,7 @@ namespace.Alerts.FormatShortNumber = function(self, value)
     return originalShortFormatter(self, value)
 end
 namespace.db.modules.shieldAbsorb.numberFormat = "SHORT"
+namespace.db.modules.shieldAbsorb.displayMode = "BAR_NUMBER"
 totalAbsorb = secretValue
 SetAura("player", "Power Word: Shield", 25218, nil, nil)
 Fire("UNIT_ABSORB_AMOUNT_CHANGED", "player")
@@ -886,6 +934,7 @@ assert(namespace.ShieldAbsorb.state == namespace.ShieldAbsorb.STATE_KNOWN)
 assert(namespace.ShieldAbsorb.amountSource == namespace.ShieldAbsorb.SOURCE_TOTAL_ABSORB)
 assert(namespace.ShieldAbsorb.amount == secretValue and namespace.ShieldAbsorb.amountIsSecret)
 assert(shieldFrame.value.text == secretValue and shortFormatterCalls == 0)
+assert(namespace.ShieldAbsorb.fillFraction == nil and shieldFrame.bar.value == 0)
 
 local rejectedSecretValue = { secret = true, failDisplay = true }
 totalAbsorb = rejectedSecretValue
@@ -896,6 +945,7 @@ assert(shortFormatterCalls == 0)
 namespace.Alerts.FormatShortNumber = originalShortFormatter
 namespace.ShieldAbsorb.secretValueDetector = nil
 namespace.db.modules.shieldAbsorb.numberFormat = "EXACT"
+namespace.db.modules.shieldAbsorb.displayMode = "ICON_NUMBER"
 totalAbsorb = nil
 
 -- Preview data is isolated from runtime data. Its timer restores a newer runtime
