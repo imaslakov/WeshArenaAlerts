@@ -4,6 +4,7 @@ local ClassIcon = {}
 WAA.ClassIcon = ClassIcon
 
 local CLASS_TEXTURE = "Interface\\Glues\\CharacterCreate\\UI-CharacterCreate-Classes"
+local ARENA_PET_UNITS = { "arenapet1", "arenapet2", "arenapet3", "arenapet4", "arenapet5" }
 local TBC_CLASSES = {
     WARRIOR = true,
     PALADIN = true,
@@ -48,11 +49,13 @@ function ClassIcon:Initialize()
 
     self.activeByUnit = {}
     self.activeByGUID = {}
+    self.activeByNamePlate = {}
     self.visibleUnits = {}
     self.pendingByUnit = {}
     self.pool = {}
     WAA.Arena:RegisterRuntimeEvent(self, "NAME_PLATE_UNIT_ADDED", self.OnNamePlateEvent)
     WAA.Arena:RegisterRuntimeEvent(self, "NAME_PLATE_UNIT_REMOVED", self.OnNamePlateEvent)
+    WAA.Arena:RegisterRuntimeEvent(self, "UNIT_PET", self.OnPetEvent)
     self.initialized = true
 
     if WAA.isInArena then
@@ -118,6 +121,39 @@ function ClassIcon:SetClassTexture(texture, classFile)
         return false
     end
     return true
+end
+
+function ClassIcon:SetPetTexture(texture, petUnit)
+    if not texture then
+        return false
+    end
+
+    texture:SetTexture(nil)
+    texture:SetTexCoord(0, 1, 0, 1)
+    if type(SetPortraitTexture) ~= "function" then
+        WAA:Debug("ClassIcon pet portrait API unavailable: unit=" .. tostring(petUnit))
+        return false
+    end
+
+    local ok = pcall(SetPortraitTexture, texture, petUnit)
+    if not ok then
+        texture:SetTexture(nil)
+        WAA:Debug("ClassIcon pet portrait unavailable: unit=" .. tostring(petUnit))
+        return false
+    end
+    return true
+end
+
+function ClassIcon:GetArenaPetByGUID(guid)
+    if not guid then
+        return nil
+    end
+    for index, petUnit in ipairs(ARENA_PET_UNITS) do
+        if WAA.Arena.opponents["arena" .. index] and UnitGUID(petUnit) == guid then
+            return petUnit
+        end
+    end
+    return nil
 end
 
 function ClassIcon:SetBorderShown(frame, shown)
@@ -186,6 +222,9 @@ function ClassIcon:ReleaseFrame(frame)
     if frame.guid and self.activeByGUID[frame.guid] == frame then
         self.activeByGUID[frame.guid] = nil
     end
+    if frame.namePlate and self.activeByNamePlate[frame.namePlate] == frame then
+        self.activeByNamePlate[frame.namePlate] = nil
+    end
     frame:Hide()
     frame:ClearAllPoints()
     frame:SetParent(UIParent)
@@ -194,6 +233,8 @@ function ClassIcon:ReleaseFrame(frame)
     frame.unitToken = nil
     frame.guid = nil
     frame.classFile = nil
+    frame.iconKind = nil
+    frame.petUnit = nil
     frame.namePlate = nil
     frame.anchor = nil
     frame.isPooled = true
@@ -221,30 +262,44 @@ function ClassIcon:ShowForUnit(unitToken, refreshReason)
         return false
     end
 
-    local opponent = WAA.Arena:GetOpponentByGUID(guid)
-    if not opponent then
-        self:ReleaseUnit(unitToken)
-        self.pendingByUnit[unitToken] = guid
-        WAA:Debug("ClassIcon ignored: GUID is not mapped arena opponent")
-        return false
-    end
-    if not TBC_CLASSES[opponent.classFile] then
-        self:ReleaseUnit(unitToken)
-        self.pendingByUnit[unitToken] = nil
-        WAA:Debug("ClassIcon texture unavailable: class=" .. tostring(opponent.classFile))
-        return false
-    end
-
     if not C_NamePlate or type(C_NamePlate.GetNamePlateForUnit) ~= "function" then
         self:ReleaseUnit(unitToken)
         WAA:Debug("ClassIcon nameplate API unavailable")
         return false
     end
     local namePlate = C_NamePlate.GetNamePlateForUnit(unitToken)
+    local staleNamePlateFrame = namePlate and self.activeByNamePlate[namePlate]
+    if staleNamePlateFrame
+        and (staleNamePlateFrame.unitToken ~= unitToken or staleNamePlateFrame.guid ~= guid)
+    then
+        WAA:Debug(
+            "ClassIcon recycled nameplate cleanup:",
+            tostring(staleNamePlateFrame.unitToken),
+            "->",
+            unitToken
+        )
+        self:ReleaseFrame(staleNamePlateFrame)
+    end
     local anchor = self:ResolveNamePlateAnchor(namePlate)
     if not anchor then
         self:ReleaseUnit(unitToken)
         WAA:Debug("ClassIcon nameplate frame unavailable: unit=" .. unitToken)
+        return false
+    end
+
+
+    local opponent = WAA.Arena:GetOpponentByGUID(guid)
+    local petUnit = not opponent and self:GetArenaPetByGUID(guid) or nil
+    if not opponent and not petUnit then
+        self:ReleaseUnit(unitToken)
+        self.pendingByUnit[unitToken] = guid
+        WAA:Debug("ClassIcon ignored: GUID is not mapped arena opponent")
+        return false
+    end
+    if opponent and not TBC_CLASSES[opponent.classFile] then
+        self:ReleaseUnit(unitToken)
+        self.pendingByUnit[unitToken] = nil
+        WAA:Debug("ClassIcon texture unavailable: class=" .. tostring(opponent.classFile))
         return false
     end
 
@@ -259,28 +314,42 @@ function ClassIcon:ShowForUnit(unitToken, refreshReason)
     end
 
     local frame = existing or self:AcquireFrame()
-    if not self:SetClassTexture(frame.icon, opponent.classFile) then
+    local textureReady
+    if opponent then
+        textureReady = self:SetClassTexture(frame.icon, opponent.classFile)
+    else
+        textureReady = self:SetPetTexture(frame.icon, petUnit)
+    end
+    if not textureReady then
         self:ReleaseFrame(frame)
         return false
     end
 
     frame.unitToken = unitToken
     frame.guid = guid
-    frame.classFile = opponent.classFile
+    frame.classFile = opponent and opponent.classFile or nil
+    frame.iconKind = opponent and "CLASS" or "PET"
+    frame.petUnit = petUnit
     frame.namePlate = namePlate
     frame.anchor = anchor
     self.activeByUnit[unitToken] = frame
     self.activeByGUID[guid] = frame
+    self.activeByNamePlate[namePlate] = frame
     self:ApplyVisualSettings(frame, anchor)
     frame:Show()
 
     local wasPending = self.pendingByUnit[unitToken] == guid
     self.pendingByUnit[unitToken] = nil
     if refreshReason == "mapping" and wasPending then
-        WAA:Debug("ClassIcon late mapping resolved: " .. unitToken .. " -> " .. tostring(opponent.unit))
+        WAA:Debug("ClassIcon late mapping resolved: " .. unitToken .. " -> " .. tostring(opponent and opponent.unit or petUnit))
     end
-    WAA:Debug("ClassIcon matched: " .. unitToken .. " -> " .. tostring(opponent.unit) .. " -> " .. opponent.classFile)
-    WAA:Debug("ClassIcon shown: unit=" .. unitToken .. " class=" .. opponent.classFile)
+    if opponent then
+        WAA:Debug("ClassIcon matched: " .. unitToken .. " -> " .. tostring(opponent.unit) .. " -> " .. opponent.classFile)
+        WAA:Debug("ClassIcon shown: unit=" .. unitToken .. " class=" .. opponent.classFile)
+    else
+        WAA:Debug("ClassIcon matched pet: " .. unitToken .. " -> " .. petUnit)
+        WAA:Debug("ClassIcon shown: unit=" .. unitToken .. " pet=" .. petUnit)
+    end
     return true
 end
 
@@ -301,6 +370,13 @@ function ClassIcon:OnNamePlateEvent(event, unitToken)
         self.visibleUnits[unitToken] = nil
         self.pendingByUnit[unitToken] = nil
         WAA:Debug("ClassIcon removed: unit=" .. unitToken .. " guid=" .. tostring(guid))
+    end
+end
+
+function ClassIcon:OnPetEvent(_, ownerUnit)
+    if type(ownerUnit) == "string" and ownerUnit:match("^arena[1-5]$") then
+        WAA:Debug("ClassIcon arena pet changed: owner=" .. ownerUnit)
+        self:RefreshVisibleNameplates("pet")
     end
 end
 
@@ -371,6 +447,7 @@ function ClassIcon:ClearRuntime()
     end
     wipe(self.activeByUnit or {})
     wipe(self.activeByGUID or {})
+    wipe(self.activeByNamePlate or {})
     wipe(self.visibleUnits or {})
     wipe(self.pendingByUnit or {})
 end

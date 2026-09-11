@@ -129,6 +129,10 @@ Settings = {
 }
 
 function GetSpellTexture() return nil end
+function SetPortraitTexture(texture, unit)
+    texture:SetTexture("PORTRAIT:" .. tostring(unit))
+    texture:SetTexCoord(0, 1, 0, 1)
+end
 function GetSpellInfo(spellID)
     if spellID == 46755 then return "Drink", nil, nil, nil, nil, nil, spellID end
     return nil
@@ -478,6 +482,59 @@ assert(namespace.ClassIcon.activeByUnit.nameplate4 == priestFrame)
 assert(priestFrame.guid == "Enemy-Rogue" and priestFrame.classFile == "ROGUE")
 assert(priestFrame.icon.texCoord[1] == namespace.ClassIcon.FALLBACK_TCOORDS.ROGUE[1])
 
+-- Enemy arena pets use their own Blizzard unit portrait instead of inheriting
+-- an owner's class icon. The owner slot must itself be a mapped arena opponent.
+arenaUnits.arenapet1 = { guid = "Enemy-Pet-1", name = "ArenaPetOne" }
+SetNameplate("nameplate6", "Enemy-Pet-1")
+Fire("NAME_PLATE_UNIT_ADDED", "nameplate6")
+local petIcon = namespace.ClassIcon.activeByUnit.nameplate6
+assert(petIcon and petIcon:IsShown())
+assert(petIcon.iconKind == "PET" and petIcon.petUnit == "arenapet1")
+assert(rawget(petIcon, "classFile") == nil)
+assert(petIcon.icon.texture == "PORTRAIT:arenapet1")
+assert(petIcon.mouseEnabled == false)
+
+-- The physical Blizzard nameplate frame can be recycled under a different
+-- nameplate token. Its former Warrior visual is released before the pet portrait
+-- is attached, even if REMOVED was not observed first.
+local recycledPlate = SetNameplate("nameplate7", "Enemy-Warrior-2")
+Fire("NAME_PLATE_UNIT_ADDED", "nameplate7")
+local recycledFrame = namespace.ClassIcon.activeByUnit.nameplate7
+assert(recycledFrame and recycledFrame.classFile == "WARRIOR")
+nameplates.nameplate7 = nil
+nameplateUnits.nameplate7 = nil
+recycledPlate.namePlateUnitToken = "nameplate8"
+nameplates.nameplate8 = recycledPlate
+nameplateUnits.nameplate8 = { guid = "Enemy-Pet-2" }
+arenaUnits.arenapet2 = { guid = "Enemy-Pet-2", name = "ArenaPetTwo" }
+Fire("NAME_PLATE_UNIT_ADDED", "nameplate8")
+assert(not namespace.ClassIcon.activeByUnit.nameplate7)
+assert(namespace.ClassIcon.activeByUnit.nameplate8 == recycledFrame)
+assert(recycledFrame.iconKind == "PET" and recycledFrame.petUnit == "arenapet2")
+assert(rawget(recycledFrame, "classFile") == nil)
+assert(recycledFrame.icon.texture == "PORTRAIT:arenapet2")
+RemoveNameplate("nameplate8")
+
+-- If the client portrait helper is unavailable, pet handling fails closed.
+local savedSetPortraitTexture = SetPortraitTexture
+SetPortraitTexture = nil
+arenaUnits.arenapet3 = { guid = "Enemy-Pet-No-Portrait", name = "NoPortrait" }
+SetNameplate("nameplate9", "Enemy-Pet-No-Portrait")
+assert(pcall(function() Fire("NAME_PLATE_UNIT_ADDED", "nameplate9") end))
+assert(not namespace.ClassIcon.activeByUnit.nameplate9)
+SetPortraitTexture = savedSetPortraitTexture
+RemoveNameplate("nameplate9")
+
+-- UNIT_PET resolves a pet whose arena token becomes available after its visible
+-- nameplate, without periodic scanning.
+SetNameplate("nameplate10", "Enemy-Pet-Late")
+Fire("NAME_PLATE_UNIT_ADDED", "nameplate10")
+assert(not namespace.ClassIcon.activeByUnit.nameplate10)
+arenaUnits.arenapet4 = { guid = "Enemy-Pet-Late", name = "LateArenaPet" }
+Fire("UNIT_PET", "arena4")
+assert(namespace.ClassIcon.activeByUnit.nameplate10.iconKind == "PET")
+assert(namespace.ClassIcon.activeByUnit.nameplate10.icon.texture == "PORTRAIT:arenapet4")
+
 -- Size, offsets, and border apply live to existing frames without recreation.
 namespace.db.modules.classIcon.iconSize = 40
 namespace.db.modules.classIcon.offsetX = 13
@@ -540,6 +597,7 @@ assert(PrintedContains("ClassIcon shown: unit=nameplate4 class=ROGUE"))
 assert(PrintedContains("ClassIcon removed: unit=nameplate4 guid=Enemy-Rogue"))
 assert(PrintedContains("ClassIcon refresh visible nameplates"))
 assert(PrintedContains("ClassIcon late mapping resolved: nameplate5 -> arena5"))
+assert(PrintedContains("ClassIcon matched pet: nameplate6 -> arenapet1"))
 RemoveNameplate("nameplate5")
 namespace.debugEnabled = false
 namespace.db.general.debug = false
@@ -557,6 +615,7 @@ namespace.Arena:UpdateArenaState()
 assert(not next(namespace.ClassIcon.activeByUnit))
 assert(not namespace.Arena.eventFrame.events.NAME_PLATE_UNIT_ADDED)
 assert(not namespace.Arena.eventFrame.events.NAME_PLATE_UNIT_REMOVED)
+assert(not namespace.Arena.eventFrame.events.UNIT_PET)
 assert(namespace.Options.classIconPreview.iconFrame:IsShown())
 Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
 assert(not next(namespace.ClassIcon.activeByUnit))
@@ -564,6 +623,7 @@ arenaState = true
 namespace.Arena:UpdateArenaState()
 assert(namespace.Arena.eventFrame.events.NAME_PLATE_UNIT_ADDED)
 assert(namespace.Arena.eventFrame.events.NAME_PLATE_UNIT_REMOVED)
+assert(namespace.Arena.eventFrame.events.UNIT_PET)
 assert(namespace.ClassIcon.activeByUnit.nameplate1)
 
 -- Milestone 0.5: the player aura is the only source of truth for the persistent
