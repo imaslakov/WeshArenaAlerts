@@ -13,6 +13,8 @@ local nameplates = {}
 local unitAuras = {}
 local unitAuraCalls = 0
 local totalAbsorb
+local bonusHealing = 0
+local improvedShieldRank = 0
 local cleuPayload
 local unpackValues = table.unpack or unpack
 
@@ -135,6 +137,7 @@ function SetPortraitTexture(texture, unit)
 end
 function GetSpellInfo(spellID)
     if spellID == 46755 then return "Drink", nil, nil, nil, nil, nil, spellID end
+    if spellID == 14769 then return "Improved Power Word: Shield", nil, nil, nil, nil, nil, spellID end
     return nil
 end
 function PlaySound() soundCount = soundCount + 1 end
@@ -154,11 +157,13 @@ function UnitClass(unit)
     return opponent.className, opponent.classFile, opponent.classID
 end
 function UnitName(unit) return arenaUnits[unit] and arenaUnits[unit].name or nil end
+function UnitIsUnit(first, second) return first == second end
 function UnitAura(unit, index)
     unitAuraCalls = unitAuraCalls + 1
     local aura = unitAuras[unit] and unitAuras[unit][index]
     if not aura then return nil end
-    return aura.name, aura.texture, aura.applications, nil, nil, nil, nil, nil, nil, aura.spellID
+    return aura.name, aura.texture, aura.applications, nil, nil, aura.expirationTime,
+        aura.sourceUnit, nil, nil, aura.spellID
 end
 function UnitIsPlayer(unit)
     local metadata = nameplateUnits[unit]
@@ -180,6 +185,12 @@ function UnitHealthMax(unit)
     return metadata and metadata.maxHealth or nil
 end
 function UnitGetTotalAbsorbs() return totalAbsorb end
+function GetSpellBonusHealing() return bonusHealing end
+function GetNumTalentTabs() return 1 end
+function GetNumTalents() return 1 end
+function GetTalentInfo()
+    return "Improved Power Word: Shield", nil, nil, nil, improvedShieldRank, 3
+end
 function IsInInstance() return arenaState, arenaState and "arena" or "none" end
 function CombatLogGetCurrentEventInfo() return unpackValues(cleuPayload) end
 function wipe(target) for key in pairs(target) do target[key] = nil end end
@@ -316,7 +327,7 @@ local function AuraEvent(eventType, destGUID, spellID, spellName)
     }
 end
 
-local function SetAura(unit, spellName, spellID, applications, points, texture, auraInstanceID)
+local function SetAura(unit, spellName, spellID, applications, points, texture, auraInstanceID, sourceUnit, expirationTime)
     unitAuras[unit] = spellName and {
         {
             name = spellName,
@@ -325,6 +336,8 @@ local function SetAura(unit, spellName, spellID, applications, points, texture, 
             points = points,
             texture = texture,
             auraInstanceID = auraInstanceID,
+            sourceUnit = sourceUnit,
+            expirationTime = expirationTime,
         },
     } or nil
 end
@@ -340,6 +353,8 @@ local function UseModernAuras()
                 points = aura.points,
                 icon = aura.texture,
                 auraInstanceID = aura.auraInstanceID,
+                sourceUnit = aura.sourceUnit,
+                expirationTime = aura.expirationTime,
             }
         end,
     }
@@ -1142,6 +1157,55 @@ assert(namespace.ShieldAbsorb.state == namespace.ShieldAbsorb.STATE_UNKNOWN)
 assert(namespace.ShieldAbsorb.amount == nil)
 assert(shieldFrame:IsShown() and shieldFrame.value.text == "?")
 
+-- TBC fallback computes a self-cast shield from rank, bonus healing, and the
+-- Improved PW:S talent, then keeps the remaining amount through aura rescans.
+bonusHealing = 1000
+improvedShieldRank = 3
+SetAura("player", "Power Word: Shield", 25218, nil, { 0, 0, 0 }, nil, 100, "player", 500)
+Fire("UNIT_AURA", "player")
+assert(namespace.ShieldAbsorb.state == namespace.ShieldAbsorb.STATE_KNOWN)
+assert(namespace.ShieldAbsorb.amountSource == namespace.ShieldAbsorb.SOURCE_CALCULATED_COMBAT_LOG)
+assert(namespace.ShieldAbsorb.amount == 1800 and namespace.ShieldAbsorb.observedMaximum == 1800)
+
+cleuPayload = {
+    now, "SPELL_DAMAGE", false, "Enemy-Caster", "Caster", 0, 0,
+    playerGUID, "Self", 0, 0, 12345, "Attack", 1,
+    400, 0, 1, 0, 0, 250, false, false, false,
+}
+Fire("COMBAT_LOG_EVENT_UNFILTERED")
+assert(namespace.ShieldAbsorb.amount == 1550)
+Fire("UNIT_AURA", "player")
+assert(namespace.ShieldAbsorb.amount == 1550, "same-aura rescan reset calculated absorb")
+
+cleuPayload = {
+    now, "SPELL_MISSED", false, "Enemy-Caster", "Caster", 0, 0,
+    playerGUID, "Self", 0, 0, 12345, "Attack", 1, "ABSORB", false, 500, false,
+}
+Fire("COMBAT_LOG_EVENT_UNFILTERED")
+assert(namespace.ShieldAbsorb.amount == 1050)
+
+cleuPayload = {
+    now, "SPELL_ABSORBED", false, "Enemy-Caster", "Caster", 0, 0,
+    playerGUID, "Self", 0, 0, 12345, "Attack", 1,
+    "Player-Self", "Self", 0, 0,
+    25218, "Power Word: Shield", 2, 200,
+}
+Fire("COMBAT_LOG_EVENT_UNFILTERED")
+assert(namespace.ShieldAbsorb.amount == 850)
+
+SetAura("player", "Power Word: Shield", 25218, nil, { 0, 0, 0 }, nil, 101, "player", 530)
+Fire("UNIT_AURA", "player")
+assert(namespace.ShieldAbsorb.amount == 1800, "new aura did not restore calculated maximum")
+assert(math.abs(shieldFrame.bar.value - 1) < 0.0001)
+
+SetAura("player", "Power Word: Shield", 25218, nil, { 0, 0, 0 }, nil, 102, "party1", 540)
+Fire("UNIT_AURA", "player")
+assert(namespace.ShieldAbsorb.state == namespace.ShieldAbsorb.STATE_UNKNOWN)
+assert(namespace.ShieldAbsorb.amount == nil)
+bonusHealing = 0
+improvedShieldRank = 0
+cleuPayload = nil
+
 -- Normal number formatting is live, and visual settings update the existing frame.
 SetAura("player", "Power Word: Shield", 25218, nil, { 1847 })
 Fire("UNIT_AURA", "player")
@@ -1270,6 +1334,7 @@ namespace.Alerts.shieldDisplayMode = nil
 arenaState = true
 namespace.Arena:UpdateArenaState()
 assert(namespace.Arena.eventFrame.events.UNIT_ABSORB_AMOUNT_CHANGED)
+assert(namespace.Arena.eventFrame.events.COMBAT_LOG_EVENT_UNFILTERED)
 assert(namespace.ShieldAbsorb.amount == 777 and shieldFrame:IsShown())
 namespace.ShieldAbsorb:ClearRuntime()
 namespace.ShieldAbsorb:ScanPlayer("initial scan")
@@ -1300,9 +1365,24 @@ assert(PrintedContains("Shield fallback source=TOTAL_ABSORB"))
 assert(PrintedContains("Shield amount unavailable"))
 assert(PrintedContains("Shield state: KNOWN -> UNKNOWN"))
 assert(PrintedContains("Power Word: Shield removed"))
+
+-- Shield diagnostics retain zero/nil aura sources and the complete variable
+-- combat-log payload for incoming damage while the self shield is present.
+SetAura("player", "Power Word: Shield", 25218, nil, { 0, 0, 0 })
+namespace.ShieldAbsorb:ScanPlayer("UNIT_AURA")
+cleuPayload = {
+    now, "SPELL_MISSED", false, "Enemy-Caster", "Caster", 0, 0,
+    playerGUID, "Self", 0, 0, 12345, "Attack", 1, "ABSORB", false, 684, false,
+}
+Fire("COMBAT_LOG_EVENT_UNFILTERED")
+assert(PrintedContains("Shield aura points raw: 0,0,0,<nil>,<nil>"))
+assert(PrintedContains("Shield total absorb raw: <nil>"))
+assert(PrintedContains("Shield CLEU raw: event=SPELL_MISSED"))
+assert(PrintedContains("arg17= 684"))
 namespace.debugEnabled = false
 namespace.db.general.debug = false
 totalAbsorb = nil
+cleuPayload = nil
 C_UnitAuras = nil
 
 -- Milestone 0.4: a mapped enemy Hunter's successful Scatter cast flashes
