@@ -2,7 +2,7 @@
 ## Title: WeshArenaAlerts
 ## Notes: Arena-only alerts, class icons, and pet portraits for TBC Anniversary.
 ## Author: Wesh
-## Version: 0.7.0
+## Version: 0.9.0
 ## SavedVariables: WeshArenaAlertsDB
 
 Defaults.lua
@@ -10,9 +10,11 @@ Core.lua
 Alerts.lua
 Arena.lua
 ClassIcon.lua
+ExecuteRange.lua
 EnemyOverpower.lua
 Drinking.lua
 InnerFire.lua
 ShieldAbsorb.lua
 Scatter.lua
+WyvernSting.lua
 Options.lua

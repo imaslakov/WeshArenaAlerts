@@ -3,7 +3,7 @@ local _, WAA = ...
 local Alerts = {}
 WAA.Alerts = Alerts
 
-local POSITION_KEYS = { "drinking", "innerFire", "shieldAbsorb", "enemyOverpower" }
+local POSITION_KEYS = { "drinking", "innerFire", "shieldAbsorb", "enemyOverpower", "executeRange" }
 
 local SPELLS = {
     drinking = 430,       -- Rank 1 Drink; only used to ask the client for its standard icon.
@@ -87,12 +87,16 @@ function Alerts:Initialize()
     self.overpowerDisplayMode = nil
     self.overpowerRuntimeActive = false
     self.overpowerUpdateElapsed = 0
+    self.executeRangeDisplayMode = nil
+    self.executeRangeRuntimeActive = false
     self.scatterDisplayMode = nil
+    self.reactionFlashRuntimeModule = nil
 
     self:CreateDrinkingFrame()
     self:CreateInnerFireFrame()
     self:CreateShieldFrame()
     self:CreateOverpowerFrame()
+    self:CreateExecuteRangeFrame()
     self:CreateScatterFrame()
     self:ApplyAllPositions()
 
@@ -209,6 +213,23 @@ function Alerts:CreateOverpowerFrame()
     frame.countdown = countdown
 end
 
+function Alerts:CreateExecuteRangeFrame()
+    local frame = self:CreateMovableFrame("executeRange", 430, 92)
+    local text = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightHuge")
+    text:SetPoint("CENTER", frame, "CENTER", 0, 12)
+    text:SetText("EXECUTE RANGE!")
+    text:SetTextColor(1, 0.12, 0.08)
+    text:SetShadowOffset(2, -2)
+    frame.text = text
+
+    local detail = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    detail:SetPoint("TOP", text, "BOTTOM", 0, -6)
+    detail:SetText("Warrior: Execute / Paladin: Hammer of Wrath")
+    detail:SetTextColor(1, 0.72, 0.18)
+    detail:SetShadowOffset(1, -1)
+    frame.detail = detail
+end
+
 function Alerts:CreateScatterFrame()
     local frame = CreateFrame("Frame", nil, UIParent)
     frame:SetAllPoints(UIParent)
@@ -272,6 +293,7 @@ function Alerts:UnlockFrames()
     self:ShowInnerFirePreview(true)
     self:ShowShieldPreview(true)
     self:ShowOverpowerPreview(true, true)
+    self:ShowExecuteRangePreview(true)
     for _, key in ipairs(POSITION_KEYS) do
         self:SetPositioningStyle(self.frames[key], true)
     end
@@ -289,6 +311,7 @@ function Alerts:LockFrames()
     self.innerFireDisplayMode = nil
     self.shieldDisplayMode = nil
     self.overpowerDisplayMode = nil
+    self.executeRangeDisplayMode = nil
     if WAA.EnemyOverpower then
         WAA.EnemyOverpower:RefreshVisual(false)
     end
@@ -297,6 +320,9 @@ function Alerts:LockFrames()
     end
     if WAA.ShieldAbsorb then
         WAA.ShieldAbsorb:RefreshVisual()
+    end
+    if WAA.ExecuteRange then
+        WAA.ExecuteRange:RefreshVisual()
     end
 end
 
@@ -386,52 +412,60 @@ function Alerts:HideDrinkingRuntime()
 end
 
 function Alerts:ShowScatterPreview()
-    local settings = WAA.db.modules.scatter
-    if not settings.flashEnabled then
-        return
-    end
-    local frame = self.frames.scatter
-    local token = self:CancelHide("scatter")
-    self.scatterDisplayMode = "preview"
-    frame:SetAlpha(settings.opacity)
-    frame:Show()
-    C_Timer.After(settings.duration, function()
-        if self.hideTokens.scatter ~= token or self.scatterDisplayMode ~= "preview" then
-            return
-        end
-        self.scatterDisplayMode = nil
-        frame:Hide()
-    end)
+    return self:ShowReactionFlash("scatter", "preview")
 end
 
 function Alerts:ShowScatterRuntime()
-    local settings = WAA.db.modules.scatter
+    return self:ShowReactionFlash("scatter", "runtime")
+end
+
+function Alerts:HideScatterRuntime()
+    self:HideReactionFlashRuntime("scatter")
+end
+
+function Alerts:ShowWyvernStingPreview()
+    return self:ShowReactionFlash("wyvernSting", "preview")
+end
+
+function Alerts:ShowWyvernStingRuntime()
+    return self:ShowReactionFlash("wyvernSting", "runtime")
+end
+
+function Alerts:HideWyvernStingRuntime()
+    self:HideReactionFlashRuntime("wyvernSting")
+end
+
+function Alerts:ShowReactionFlash(moduleKey, displayMode)
+    local settings = WAA.db.modules[moduleKey]
     if not settings.flashEnabled then
         return false
     end
-
     local frame = self.frames.scatter
     local token = self:CancelHide("scatter")
-    self.scatterDisplayMode = "runtime"
+    self.scatterDisplayMode = displayMode
+    self.reactionFlashRuntimeModule = displayMode == "runtime" and moduleKey or nil
     frame:SetAlpha(settings.opacity)
     frame:Show()
     C_Timer.After(settings.duration, function()
-        if self.hideTokens.scatter ~= token or self.scatterDisplayMode ~= "runtime" then
+        if self.hideTokens.scatter ~= token or self.scatterDisplayMode ~= displayMode then
             return
         end
         self.scatterDisplayMode = nil
+        self.reactionFlashRuntimeModule = nil
         frame:Hide()
     end)
     return true
 end
 
-function Alerts:HideScatterRuntime()
-    if self.scatterDisplayMode ~= "runtime" then
+function Alerts:HideReactionFlashRuntime(moduleKey)
+    if self.scatterDisplayMode ~= "runtime"
+        or self.reactionFlashRuntimeModule ~= moduleKey then
         return
     end
     self:CancelHide("scatter")
     self.frames.scatter:Hide()
     self.scatterDisplayMode = nil
+    self.reactionFlashRuntimeModule = nil
 end
 
 function Alerts:ApplyInnerFireSettings(state, charges)
@@ -753,12 +787,69 @@ function Alerts:HideOverpowerRuntime()
     self.overpowerDisplayMode = nil
 end
 
+function Alerts:ApplyExecuteRangeSettings(threatLabel)
+    local settings = WAA.db.modules.executeRange
+    local frame = self.frames.executeRange
+    SetFontSize(frame.text, settings.textSize)
+    SetFontSize(frame.detail, math.max(12, math.floor(settings.textSize * 0.48)))
+    frame.detail:SetText(threatLabel or "Warrior: Execute / Paladin: Hammer of Wrath")
+end
+
+function Alerts:ShowExecuteRangePreview(persistent)
+    local frame = self.frames.executeRange
+    local token = self:CancelHide("executeRange")
+    self.executeRangeDisplayMode = "preview"
+    self:ApplyExecuteRangeSettings()
+    frame:Show()
+    if persistent then
+        return
+    end
+
+    C_Timer.After(4, function()
+        if self.hideTokens.executeRange ~= token
+            or self.executeRangeDisplayMode ~= "preview" then
+            return
+        end
+        self.executeRangeDisplayMode = nil
+        if self.executeRangeRuntimeActive and WAA.ExecuteRange then
+            WAA.ExecuteRange:RefreshVisual()
+        elseif not self.positioningMode then
+            frame:Hide()
+        end
+    end)
+end
+
+function Alerts:ShowExecuteRangeRuntime(threatLabel)
+    self.executeRangeRuntimeActive = true
+    if self.positioningMode or self.executeRangeDisplayMode == "preview" then
+        return
+    end
+
+    local frame = self.frames.executeRange
+    self:CancelHide("executeRange")
+    self.executeRangeDisplayMode = "runtime"
+    self:ApplyExecuteRangeSettings(threatLabel)
+    frame:Show()
+end
+
+function Alerts:HideExecuteRangeRuntime()
+    self.executeRangeRuntimeActive = false
+    if self.executeRangeDisplayMode ~= "runtime" then
+        return
+    end
+    self:CancelHide("executeRange")
+    self.frames.executeRange:Hide()
+    self.executeRangeDisplayMode = nil
+end
+
 function Alerts:TestAll()
     self:ShowDrinkingPreview()
     self:ShowScatterPreview()
+    self:ShowWyvernStingPreview()
     self:ShowInnerFirePreview()
     self:ShowShieldPreview()
     self:ShowOverpowerPreview()
+    self:ShowExecuteRangePreview()
 end
 
 function Alerts:HideAll()
@@ -779,7 +870,10 @@ function Alerts:ClearRuntime()
     self.shieldDisplayMode = nil
     self.overpowerRuntimeActive = false
     self.overpowerDisplayMode = nil
+    self.executeRangeRuntimeActive = false
+    self.executeRangeDisplayMode = nil
     self.scatterDisplayMode = nil
+    self.reactionFlashRuntimeModule = nil
 
     if keepPositioningMode then
         self:UnlockFrames()

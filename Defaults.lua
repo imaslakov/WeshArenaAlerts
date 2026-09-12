@@ -3,11 +3,7 @@ local _, WAA = ...
 WAA.Defaults = {
     general = {
         enabled = true,
-        debug = false,
-    },
-    debugLog = {
-        enabled = false,
-        entries = {},
+        showDebugMessages = false,
     },
     modules = {
         drinking = {
@@ -17,6 +13,12 @@ WAA.Defaults = {
             duration = 3.0,
         },
         scatter = {
+            enabled = true,
+            flashEnabled = true,
+            opacity = 0.55,
+            duration = 0.45,
+        },
+        wyvernSting = {
             enabled = true,
             flashEnabled = true,
             opacity = 0.55,
@@ -48,6 +50,10 @@ WAA.Defaults = {
             showCountdown = true,
             playSound = true,
         },
+        executeRange = {
+            enabled = true,
+            textSize = 36,
+        },
     },
     positions = {
         drinking = {
@@ -73,6 +79,12 @@ WAA.Defaults = {
             relativePoint = "CENTER",
             x = 150,
             y = 30,
+        },
+        executeRange = {
+            point = "CENTER",
+            relativePoint = "CENTER",
+            x = 0,
+            y = -90,
         },
     },
 }

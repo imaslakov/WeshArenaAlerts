@@ -60,6 +60,9 @@ function Arena:Activate()
     if WAA.ShieldAbsorb then
         WAA.ShieldAbsorb:OnArenaActivated()
     end
+    if WAA.ExecuteRange then
+        WAA.ExecuteRange:OnArenaActivated()
+    end
     if WAA.ClassIcon and WAA.ClassIcon.initialized then
         WAA.ClassIcon:OnArenaActivated()
     end
@@ -81,8 +84,14 @@ function Arena:Deactivate()
     if WAA.ShieldAbsorb then
         WAA.ShieldAbsorb:ClearRuntime()
     end
+    if WAA.ExecuteRange then
+        WAA.ExecuteRange:ClearRuntime()
+    end
     if WAA.Scatter then
         WAA.Scatter:ClearRuntime()
+    end
+    if WAA.WyvernSting then
+        WAA.WyvernSting:ClearRuntime()
     end
     if WAA.ClassIcon then
         WAA.ClassIcon:ClearRuntime()
@@ -116,10 +125,16 @@ function Arena:UpdateOpponent(unitToken, updateType, deferClassIconRefresh)
         if WAA.Scatter then
             WAA.Scatter:RemoveOpponent(old.guid)
         end
+        if WAA.WyvernSting then
+            WAA.WyvernSting:RemoveOpponent(old.guid)
+        end
     end
 
     if not guid then
         self.opponents[unitToken] = nil
+        if WAA.ExecuteRange then
+            WAA.ExecuteRange:OnOpponentMappingChanged()
+        end
         if not deferClassIconRefresh and WAA.ClassIcon and WAA.ClassIcon.initialized then
             WAA.ClassIcon:OnOpponentMappingChanged(unitToken)
         end
@@ -146,6 +161,9 @@ function Arena:UpdateOpponent(unitToken, updateType, deferClassIconRefresh)
     )
     if WAA.Drinking then
         WAA.Drinking:OnOpponentMapped(unitToken)
+    end
+    if WAA.ExecuteRange then
+        WAA.ExecuteRange:OnOpponentMappingChanged()
     end
     if not deferClassIconRefresh and WAA.ClassIcon and WAA.ClassIcon.initialized then
         WAA.ClassIcon:OnOpponentMappingChanged(unitToken)

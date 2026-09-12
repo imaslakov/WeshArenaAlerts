@@ -8,6 +8,18 @@ WeshArenaAlerts is an arena-focused alert addon for **World of Warcraft: The Bur
 2. Confirm that **WeshArenaAlerts** is enabled on the character-selection AddOns screen.
 3. Open the settings with `Esc -> Options -> AddOns -> WeshArenaAlerts` or `/waa`.
 
+## Milestone 0.9
+
+Version 0.9.0 adds the persistent **Execute Range** warning for the addon's player. The automatic warning is evaluated only inside an arena and only while at least one mapped opponent is a Warrior or Paladin. It listens to `UNIT_HEALTH` and `UNIT_MAXHEALTH` for `player`, refreshes when arena-opponent mappings change, and does not poll.
+
+The thresholds preserve the abilities' different boundary rules without percentage rounding: an enemy Warrior puts the player in Execute range only when `currentHealth * 5 < maxHealth`, while an enemy Paladin puts the player in Hammer of Wrath range when `currentHealth * 5 <= maxHealth`. At exactly 20%, a Warrior alone does not produce a warning; a Paladin does. The alert identifies the currently applicable enemy ability, remains visible until the player leaves the applicable health range, and clears on arena exit or when the addon/module is disabled. Its position and text size are configurable, and a manual preview works outside arenas.
+
+## Milestone 0.8
+
+Version 0.8.0 adds the automatic **Enemy Wyvern Sting Reaction Alert**. Every normal TBC Hunter rank (`19386`, `24132`, `24133`, and `27068`) triggers the existing red fullscreen overlay as soon as a mapped enemy Hunter successfully uses the ability. `UNIT_SPELLCAST_SUCCEEDED` on `arena1` through `arena5` is preferred, with `SPELL_CAST_SUCCESS` from the shared combat log as fallback.
+
+Like Scatter Shot, this alert reacts to the enemy button press rather than its outcome: destination is intentionally ignored, no aura or debuff is required, and a later miss or immune result does not cancel the flash. UNIT and CLEU notifications are deduplicated per Hunter GUID for 0.5 seconds. Wyvern Sting has independent enable, flash, opacity, duration, and manual-preview controls while reusing the same non-interactive fullscreen frame as Scatter Shot.
+
 ## Milestone 0.7
 
 Version 0.7.0 adds **Self Power Word: Shield Remaining Absorb**. The automatic module runs only in arenas and only for the addon owner when `UnitClass("player")` reports `PRIEST`. It recognizes every normal TBC player rank (`17`, `592`, `600`, `3747`, `6065`, `6066`, `10898`, `10899`, `10900`, `10901`, `25217`, and `25218`) and never activates for a teammate, enemy, unrelated buff, or noncanonical shield spell.
@@ -64,8 +76,6 @@ Drink recognition primarily compares the aura name with the client's localized c
 
 The **Enemy Overpower Opportunity** module from Milestone 0.2 remains available with its 5-second reconstructed opportunity window.
 
-Use `/waa debug` to toggle internal arena mapping and combat-log diagnostics before a test. Plain `/waa` continues to open Settings.
+Chat diagnostics can be enabled explicitly with **Show debug messages in chat** on the General settings page. The option is disabled by default. Plain `/waa` opens Settings.
 
-For diagnostics that need to be shared as a file, use `/waa log start`, reproduce the issue, then run `/waa log stop` and `/reload`. The recorder keeps the newest 500 debug entries even when chat debug is disabled. After reload, send the account-wide SavedVariables file from `_anniversary_/WTF/Account/<ACCOUNT>/SavedVariables/WeshArenaAlerts.lua`; the captured lines are stored under `WeshArenaAlertsDB.debugLog.entries`. `/waa log status` reports the recorder state and entry count, while `/waa log clear` removes the stored entries.
-
-**Milestones 0.1-0.7 require real validation in the TBC Anniversary 2.5.6 client.** The first captured arena log confirmed that `AuraData.points` has no positive PW:S amount, `UnitGetTotalAbsorbs("player")` returns zero or unusable data, and `UNIT_ABSORB_AMOUNT_CHANGED("player")` does not fire. The next arena test must validate the calculated starting maximum and the exact payload offsets/amounts produced for partial and full absorbs against the player. Existing validation also remains for the live Inner Fire aura payload (`applications`/legacy `count`), enemy `UNIT_SPELLCAST_SUCCEEDED`, Anniversary nameplate tokens and `C_NamePlate`, stock-nameplate anchor height, and third-party nameplate compatibility.
+**Milestones 0.1-0.9 require real validation in the TBC Anniversary 2.5.6 client.** The first captured arena log confirmed that `AuraData.points` has no positive PW:S amount, `UnitGetTotalAbsorbs("player")` returns zero or unusable data, and `UNIT_ABSORB_AMOUNT_CHANGED("player")` does not fire. The next arena test must validate the calculated starting maximum and the exact payload offsets/amounts produced for partial and full absorbs against the player. Existing validation also remains for the live player-health events and Execute/Hammer thresholds, Inner Fire aura payload (`applications`/legacy `count`), enemy Scatter Shot and Wyvern Sting `UNIT_SPELLCAST_SUCCEEDED`, Anniversary nameplate tokens and `C_NamePlate`, stock-nameplate anchor height, and third-party nameplate compatibility.

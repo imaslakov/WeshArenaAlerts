@@ -1,11 +1,10 @@
 local addonName, WAA = ...
 
 WAA.name = addonName
-WAA.version = "0.7.0"
+WAA.version = "0.9.0"
 WAA.isInArena = false
 WAA.isUnlocked = false
 WAA.initialized = false
-WAA.DEBUG_LOG_MAX_ENTRIES = 500
 
 local function CopyDefaults(defaults, target)
     if type(target) ~= "table" then
@@ -37,8 +36,9 @@ function WAA:ApplyDefaults()
     end
 
     WeshArenaAlertsDB = CopyDefaults(self.Defaults, WeshArenaAlertsDB)
+    WeshArenaAlertsDB.general.debug = nil
+    WeshArenaAlertsDB.debugLog = nil
     self.db = WeshArenaAlertsDB
-    self.debugEnabled = self.db.general.debug == true
 end
 
 function WAA:ResetPositions()
@@ -51,7 +51,6 @@ end
 function WAA:ResetAllSettings()
     WeshArenaAlertsDB = CopyTable(self.Defaults)
     self.db = WeshArenaAlertsDB
-    self.debugEnabled = self.db.general.debug == true
     self.Alerts:ApplyAllPositions()
     if self.Drinking then
         self.Drinking:OnSettingsChanged()
@@ -65,8 +64,14 @@ function WAA:ResetAllSettings()
     if self.EnemyOverpower then
         self.EnemyOverpower:OnSettingsChanged()
     end
+    if self.ExecuteRange then
+        self.ExecuteRange:OnSettingsChanged()
+    end
     if self.Scatter then
         self.Scatter:OnSettingsChanged()
+    end
+    if self.WyvernSting then
+        self.WyvernSting:OnSettingsChanged()
     end
     if self.ClassIcon then
         self.ClassIcon:OnSettingsChanged()
@@ -100,68 +105,8 @@ local function IsSecretDebugValue(value)
     return false
 end
 
-local function GetDebugTimestamp()
-    if type(date) == "function" then
-        local ok, timestamp = pcall(date, "%Y-%m-%d %H:%M:%S")
-        if ok and type(timestamp) == "string" then
-            return timestamp
-        end
-    end
-    if type(GetTime) == "function" then
-        local ok, elapsed = pcall(GetTime)
-        if ok and type(elapsed) == "number" then
-            return string.format("session+%.3f", elapsed)
-        end
-    end
-    return "time-unavailable"
-end
-
-function WAA:IsDebugLogEnabled()
-    return self.db
-        and self.db.debugLog
-        and self.db.debugLog.enabled == true
-end
-
-function WAA:AppendDebugLog(message)
-    if not self:IsDebugLogEnabled() then
-        return
-    end
-
-    local log = self.db.debugLog
-    if type(log.entries) ~= "table" then
-        log.entries = {}
-    end
-    log.entries[#log.entries + 1] = "[" .. GetDebugTimestamp() .. "] " .. tostring(message)
-    while #log.entries > self.DEBUG_LOG_MAX_ENTRIES do
-        table.remove(log.entries, 1)
-    end
-end
-
-function WAA:StartDebugLog()
-    self.db.debugLog.entries = {}
-    self.db.debugLog.enabled = true
-    self:AppendDebugLog("WeshArenaAlerts log started version=" .. tostring(self.version))
-end
-
-function WAA:StopDebugLog()
-    if self:IsDebugLogEnabled() then
-        self:AppendDebugLog("WeshArenaAlerts log stopped")
-    end
-    self.db.debugLog.enabled = false
-end
-
-function WAA:ClearDebugLog()
-    self.db.debugLog.entries = {}
-end
-
-function WAA:GetDebugLogEntryCount()
-    local entries = self.db and self.db.debugLog and self.db.debugLog.entries
-    return type(entries) == "table" and #entries or 0
-end
-
 function WAA:Debug(...)
-    local shouldPrint = self.debugEnabled == true
-    if not shouldPrint and not self:IsDebugLogEnabled() then
+    if not self.db or not self.db.general or self.db.general.showDebugMessages ~= true then
         return
     end
 
@@ -170,13 +115,7 @@ function WAA:Debug(...)
         local value = select(index, ...)
         parts[index] = IsSecretDebugValue(value) and "<secret>" or tostring(value)
     end
-    local message = table.concat(parts, " ")
-    if self:IsDebugLogEnabled() then
-        self:AppendDebugLog(message)
-    end
-    if shouldPrint then
-        print("|cff33ff99WAA:|r " .. message)
-    end
+    print("|cff33ff99WAA:|r " .. table.concat(parts, " "))
 end
 
 function WAA:Print(message)
@@ -192,11 +131,13 @@ function WAA:Initialize()
     self.Alerts:Initialize()
     self.Arena:Initialize()
     self.ClassIcon:Initialize()
+    self.ExecuteRange:Initialize()
     self.EnemyOverpower:Initialize()
     self.Drinking:Initialize()
     self.InnerFire:Initialize()
     self.ShieldAbsorb:Initialize()
     self.Scatter:Initialize()
+    self.WyvernSting:Initialize()
     self.initialized = true
     self:Debug("Initialized", self.version)
 end

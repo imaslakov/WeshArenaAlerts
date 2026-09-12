@@ -7,6 +7,8 @@ local openedSettings = 0
 local printed = {}
 local playerGUID = "Player-Self"
 local playerClassFile = "PRIEST"
+local playerHealth = 1000
+local playerMaxHealth = 1000
 local arenaUnits = {}
 local nameplateUnits = {}
 local nameplates = {}
@@ -177,10 +179,12 @@ function UnitIsFriend(_, unit)
     return nameplateUnits[unit] and nameplateUnits[unit].friendly or false
 end
 function UnitHealth(unit)
+    if unit == "player" then return playerHealth end
     local metadata = arenaUnits[unit] or nameplateUnits[unit]
     return metadata and metadata.health or nil
 end
 function UnitHealthMax(unit)
+    if unit == "player" then return playerMaxHealth end
     local metadata = arenaUnits[unit] or nameplateUnits[unit]
     return metadata and metadata.maxHealth or nil
 end
@@ -207,11 +211,13 @@ local files = {
     "Alerts.lua",
     "Arena.lua",
     "ClassIcon.lua",
+    "ExecuteRange.lua",
     "EnemyOverpower.lua",
     "Drinking.lua",
     "InnerFire.lua",
     "ShieldAbsorb.lua",
     "Scatter.lua",
+    "WyvernSting.lua",
     "Options.lua",
 }
 for _, file in ipairs(files) do
@@ -388,12 +394,40 @@ local function RemoveNameplate(unitToken)
     Fire("NAME_PLATE_UNIT_REMOVED", unitToken)
 end
 
+local function ResetWyvernSting()
+    namespace.db.general.enabled = true
+    namespace.db.modules.wyvernSting.enabled = true
+    namespace.db.modules.wyvernSting.flashEnabled = true
+    namespace.db.modules.wyvernSting.opacity = 0.55
+    namespace.db.modules.wyvernSting.duration = 0.45
+    namespace.WyvernSting:ClearRuntime()
+    namespace.Alerts:CancelHide("scatter")
+    namespace.Alerts.scatterDisplayMode = nil
+    namespace.Alerts.reactionFlashRuntimeModule = nil
+    namespace.Alerts.frames.scatter:Hide()
+    namespace.Alerts.frames.scatter.showCount = 0
+end
+
+local function AssertNoWyvernSting(message)
+    assert(namespace.Alerts.frames.scatter.showCount == 0, message)
+    assert(not namespace.Alerts.frames.scatter:IsShown(), message .. " (frame visible)")
+end
+
+WeshArenaAlertsDB = {
+    general = {
+        debug = true,
+    },
+    debugLog = {
+        enabled = true,
+        entries = { "legacy debug entry" },
+    },
+}
 Fire("ADDON_LOADED", "WeshArenaAlerts")
 Fire("PLAYER_LOGIN")
 
 -- Milestone 0.1 compatibility smoke checks.
 assert(namespace.initialized)
-assert(namespace.version == "0.7.0")
+assert(namespace.version == "0.9.0")
 assert(namespace.Drinking.drinkAuraName == "Drink")
 assert(namespace.Drinking.KNOWN_DRINK_SPELL_IDS[430])
 assert(namespace.Drinking.KNOWN_DRINK_SPELL_IDS[43154])
@@ -404,14 +438,23 @@ assert(namespace.EnemyOverpower.OVERPOWER_SPELL_IDS[11584])
 assert(namespace.EnemyOverpower.OVERPOWER_SPELL_IDS[11585])
 assert(namespace.Scatter.SCATTER_SHOT_SPELL_ID == 19503)
 assert(namespace.Scatter.SCATTER_EVENT_DEDUP_SECONDS == 0.5)
+assert(namespace.WyvernSting.WYVERN_STING_SPELL_IDS[19386])
+assert(namespace.WyvernSting.WYVERN_STING_SPELL_IDS[24132])
+assert(namespace.WyvernSting.WYVERN_STING_SPELL_IDS[24133])
+assert(namespace.WyvernSting.WYVERN_STING_SPELL_IDS[27068])
+assert(namespace.WyvernSting.WYVERN_STING_EVENT_DEDUP_SECONDS == 0.5)
 assert(namespace.InnerFire.INNER_FIRE_SPELL_IDS[588])
 assert(namespace.InnerFire.INNER_FIRE_SPELL_IDS[25431])
 assert(namespace.ShieldAbsorb.POWER_WORD_SHIELD_SPELL_IDS[17])
 assert(namespace.ShieldAbsorb.POWER_WORD_SHIELD_SPELL_IDS[25218])
 assert(namespace.ShieldAbsorb.MAX_AURA_POINT_CANDIDATES == 5)
 assert(namespace.db.modules.shieldAbsorb.displayMode == "ICON_NUMBER")
-assert(not namespace:IsDebugLogEnabled())
-assert(namespace:GetDebugLogEntryCount() == 0)
+assert(namespace.db.modules.executeRange.enabled)
+assert(namespace.db.modules.executeRange.textSize == 36)
+assert(namespace.db.general.debug == nil)
+assert(not namespace.db.general.showDebugMessages)
+assert(namespace.db.debugLog == nil)
+assert(not namespace.Options.debugChatCheckbox:GetChecked())
 assert(namespace.Alerts.frames.scatter.mouseEnabled == false)
 assert(namespace.db.modules.enemyOverpower.showCountdown)
 assert(namespace.Options.category:GetID() == 77)
@@ -421,7 +464,7 @@ namespace.Alerts:UnlockFrames()
 namespace.Alerts:ClearRuntime()
 assert(namespace.isUnlocked)
 assert(namespace.Alerts.positioningMode)
-for _, key in ipairs({ "drinking", "innerFire", "shieldAbsorb", "enemyOverpower" }) do
+for _, key in ipairs({ "drinking", "innerFire", "shieldAbsorb", "enemyOverpower", "executeRange" }) do
     assert(namespace.Alerts.frames[key]:IsShown())
     assert(namespace.Alerts.frames[key].mouseEnabled)
 end
@@ -436,39 +479,24 @@ namespace.Alerts:LockFrames()
 namespace:ResetPositions()
 SlashCmdList.WESHARENAALERTS("")
 assert(openedSettings == 1)
+local chatCountBeforeDebug = #printed
 SlashCmdList.WESHARENAALERTS(" debug ")
-assert(namespace.debugEnabled and namespace.db.general.debug)
-assert(printed[#printed] == "WeshArenaAlerts debug: ON")
-SlashCmdList.WESHARENAALERTS("debug")
-assert(not namespace.debugEnabled and not namespace.db.general.debug)
-assert(printed[#printed] == "WeshArenaAlerts debug: OFF")
-local chatCountBeforeLog = #printed
-SlashCmdList.WESHARENAALERTS("log start")
-assert(namespace:IsDebugLogEnabled())
-assert(namespace:GetDebugLogEntryCount() == 1)
-namespace:Debug("file-only debug", "value=42")
-assert(namespace:GetDebugLogEntryCount() == 2)
-assert(namespace.db.debugLog.entries[2]:find("file-only debug value=42", 1, true))
-assert(#printed == chatCountBeforeLog + 1)
-SlashCmdList.WESHARENAALERTS("log status")
-assert(printed[#printed]:find("RECORDING", 1, true))
-SlashCmdList.WESHARENAALERTS("log stop")
-assert(not namespace:IsDebugLogEnabled())
-local stoppedLogCount = namespace:GetDebugLogEntryCount()
-assert(stoppedLogCount == 3)
-namespace:Debug("must not be recorded")
-assert(namespace:GetDebugLogEntryCount() == stoppedLogCount)
-SlashCmdList.WESHARENAALERTS("log clear")
-assert(namespace:GetDebugLogEntryCount() == 0)
-namespace:StartDebugLog()
-for index = 1, namespace.DEBUG_LOG_MAX_ENTRIES + 5 do
-    namespace:Debug("bounded entry", index)
-end
-assert(namespace:GetDebugLogEntryCount() == namespace.DEBUG_LOG_MAX_ENTRIES)
-assert(namespace.db.debugLog.entries[1]:find("bounded entry 6", 1, true))
-namespace:StopDebugLog()
-assert(namespace:GetDebugLogEntryCount() == namespace.DEBUG_LOG_MAX_ENTRIES)
-namespace:ClearDebugLog()
+assert(openedSettings == 2)
+assert(not namespace.db.general.showDebugMessages)
+assert(#printed == chatCountBeforeDebug)
+namespace:Debug("disabled chat debug")
+assert(#printed == chatCountBeforeDebug)
+namespace.Options.debugChatCheckbox:SetChecked(true)
+namespace.Options.debugChatCheckbox.scripts.OnClick(namespace.Options.debugChatCheckbox)
+assert(namespace.db.general.showDebugMessages)
+namespace:Debug("enabled chat debug")
+assert(printed[#printed] == "|cff33ff99WAA:|r enabled chat debug")
+namespace.Options.debugChatCheckbox:SetChecked(false)
+namespace.Options.debugChatCheckbox.scripts.OnClick(namespace.Options.debugChatCheckbox)
+assert(not namespace.db.general.showDebugMessages)
+local chatCountAfterDisablingDebug = #printed
+namespace:Debug("disabled again")
+assert(#printed == chatCountAfterDisablingDebug)
 
 arenaUnits.arena1 = { guid = "Enemy-Warrior-1", className = "Warrior", classFile = "WARRIOR", classID = 1, name = "ArmsOne" }
 arenaUnits.arena2 = { guid = "Enemy-Rogue", className = "Rogue", classFile = "ROGUE", classID = 4, name = "Sneaky" }
@@ -484,6 +512,73 @@ assert(namespace.Arena.eventFrame.events.UNIT_SPELLCAST_SUCCEEDED)
 assert(namespace.Arena.eventFrame.events.UNIT_HEALTH)
 assert(namespace.Arena.eventFrame.events.UNIT_MAXHEALTH)
 assert(namespace.Arena:GetOpponentByGUID("Enemy-Warrior-1").classFile == "WARRIOR")
+
+-- Milestone 0.9: low player health warns only when a matching enemy class is
+-- mapped. Warrior is strictly below 20%; Paladin includes exactly 20%.
+assert(not namespace.Alerts.frames.executeRange:IsShown())
+playerHealth = 200
+Fire("UNIT_HEALTH", "player")
+assert(not namespace.ExecuteRange.isInDanger)
+assert(not namespace.Alerts.frames.executeRange:IsShown(), "Warrior must not warn at exactly 20%")
+playerHealth = 199
+Fire("UNIT_HEALTH", "player")
+assert(namespace.ExecuteRange.isInDanger)
+assert(namespace.ExecuteRange.threatLabel == "Warrior: Execute")
+assert(namespace.Alerts.frames.executeRange:IsShown())
+playerHealth = 250
+Fire("UNIT_HEALTH", "player")
+assert(not namespace.Alerts.frames.executeRange:IsShown())
+
+arenaUnits.arena4 = { guid = "Enemy-Paladin", className = "Paladin", classFile = "PALADIN", classID = 2, name = "RetOne" }
+Fire("ARENA_OPPONENT_UPDATE", "arena4", "seen")
+playerHealth = 200
+Fire("UNIT_HEALTH", "player")
+assert(namespace.ExecuteRange.isInDanger)
+assert(namespace.ExecuteRange.threatLabel == "Paladin: Hammer of Wrath")
+assert(namespace.Alerts.frames.executeRange:IsShown(), "Paladin must warn at exactly 20%")
+playerHealth = 199
+Fire("UNIT_HEALTH", "player")
+assert(namespace.ExecuteRange.threatLabel == "Warrior: Execute / Paladin: Hammer of Wrath")
+
+arenaUnits.arena4 = nil
+Fire("ARENA_OPPONENT_UPDATE", "arena4", "cleared")
+assert(namespace.ExecuteRange.threatLabel == "Warrior: Execute")
+namespace.db.modules.executeRange.enabled = false
+namespace.ExecuteRange:OnSettingsChanged()
+assert(not namespace.Alerts.frames.executeRange:IsShown())
+namespace.db.modules.executeRange.enabled = true
+namespace.ExecuteRange:OnSettingsChanged()
+assert(namespace.Alerts.frames.executeRange:IsShown(), "module re-enable must rescan current health")
+namespace.db.general.enabled = false
+namespace.ExecuteRange:OnSettingsChanged()
+assert(not namespace.Alerts.frames.executeRange:IsShown())
+namespace.db.general.enabled = true
+namespace.ExecuteRange:OnSettingsChanged()
+assert(namespace.Alerts.frames.executeRange:IsShown(), "master re-enable must rescan current health")
+
+playerMaxHealth = 1500
+playerHealth = 300
+Fire("UNIT_MAXHEALTH", "player")
+assert(not namespace.Alerts.frames.executeRange:IsShown(), "Warrior remains safe at exact 20% after max-health change")
+playerHealth = 299
+Fire("UNIT_HEALTH", "player")
+assert(namespace.Alerts.frames.executeRange:IsShown())
+namespace.Arena.opponents.arena1.classFile = "ROGUE"
+namespace.Arena.opponents.arena3.classFile = "ROGUE"
+namespace.ExecuteRange:Evaluate("test no matching class")
+assert(not namespace.ExecuteRange.isInDanger)
+assert(not namespace.Alerts.frames.executeRange:IsShown(), "low health without Warrior or Paladin must not warn")
+namespace.Arena.opponents.arena1.classFile = "WARRIOR"
+namespace.Arena.opponents.arena3.classFile = "WARRIOR"
+namespace.ExecuteRange:Evaluate("restore matching class")
+assert(namespace.Alerts.frames.executeRange:IsShown())
+playerHealth = 0
+Fire("UNIT_HEALTH", "player")
+assert(not namespace.Alerts.frames.executeRange:IsShown(), "dead player must not keep an execute warning")
+playerMaxHealth = 1000
+playerHealth = 1000
+Fire("UNIT_MAXHEALTH", "player")
+assert(not namespace.Alerts.frames.executeRange:IsShown())
 
 -- Milestone 0.6: an already-visible mapped arena opponent is resolved during
 -- arena-start refresh and anchored to the actual nameplate UnitFrame.
@@ -764,8 +859,7 @@ assert(namespace.Options.classIconPreview.iconFrame:IsShown())
 assert(rawget(namespace.Options.classIconPreview.iconFrame, "classFile") == nil)
 
 -- Debug mode exposes event, match, show, removal, late mapping, and refresh flow.
-namespace.debugEnabled = true
-namespace.db.general.debug = true
+namespace.db.general.showDebugMessages = true
 RemoveNameplate("nameplate4")
 SetNameplate("nameplate4", "Enemy-Rogue")
 Fire("NAME_PLATE_UNIT_ADDED", "nameplate4")
@@ -782,8 +876,7 @@ assert(PrintedContains("ClassIcon refresh visible nameplates"))
 assert(PrintedContains("ClassIcon late mapping resolved: nameplate5 -> arena5"))
 assert(PrintedContains("ClassIcon matched pet: nameplate6 -> arenapet1"))
 RemoveNameplate("nameplate5")
-namespace.debugEnabled = false
-namespace.db.general.debug = false
+namespace.db.general.showDebugMessages = false
 
 -- Restore defaults for later regression scenarios.
 namespace.db.modules.classIcon.iconSize = 28
@@ -985,8 +1078,7 @@ assert(unitAuraCalls > 0)
 -- Debug mode exposes state transitions, charge updates, removal, and bad counts.
 namespace.db.modules.innerFire.threshold = 5
 namespace.InnerFire:OnSettingsChanged()
-namespace.debugEnabled = true
-namespace.db.general.debug = true
+namespace.db.general.showDebugMessages = true
 SetAura("player", "Inner Fire", 25431, 6)
 Fire("UNIT_AURA", "player")
 SetAura("player", "Inner Fire", 25431, 5)
@@ -1006,8 +1098,7 @@ assert(PrintedContains("Inner Fire removed"))
 assert(PrintedContains("Inner Fire state: LOW -> MISSING"))
 assert(PrintedContains("Inner Fire state: MISSING -> OK charges=20"))
 assert(PrintedContains("Inner Fire count unavailable: spellID=25431"))
-namespace.debugEnabled = false
-namespace.db.general.debug = false
+namespace.db.general.showDebugMessages = false
 
 -- Preview is independent of the tracked runtime snapshot.
 local previewState, previewCharges = namespace.InnerFire.state, namespace.InnerFire.charges
@@ -1342,8 +1433,7 @@ assert(namespace.ShieldAbsorb.amount == 777 and shieldFrame:IsShown())
 
 -- Debug output identifies events, source selection, changes, removal, secrets,
 -- unavailable amounts, and state transitions without stringifying secret data.
-namespace.debugEnabled = true
-namespace.db.general.debug = true
+namespace.db.general.showDebugMessages = true
 namespace.ShieldAbsorb:ClearRuntime()
 SetAura("player", "Power Word: Shield", 25218, nil, { 1847 })
 namespace.ShieldAbsorb:ScanPlayer("initial scan")
@@ -1379,8 +1469,7 @@ assert(PrintedContains("Shield aura points raw: 0,0,0,<nil>,<nil>"))
 assert(PrintedContains("Shield total absorb raw: <nil>"))
 assert(PrintedContains("Shield CLEU raw: event=SPELL_MISSED"))
 assert(PrintedContains("arg17= 684"))
-namespace.debugEnabled = false
-namespace.db.general.debug = false
+namespace.db.general.showDebugMessages = false
 totalAbsorb = nil
 cleuPayload = nil
 C_UnitAuras = nil
@@ -1518,6 +1607,111 @@ namespace.Scatter:OnSettingsChanged()
 assert(not next(namespace.Scatter.lastScatterCast))
 assert(not namespace.Alerts.frames.scatter:IsShown(), "master disable must hide Scatter runtime")
 namespace.db.general.enabled = true
+
+-- Milestone 0.8: all normal TBC Wyvern Sting ranks use the same immediate
+-- enemy-Hunter reaction model and the existing fullscreen frame.
+ResetWyvernSting()
+now = 1100
+Fire("UNIT_SPELLCAST_SUCCEEDED", "arena3", "Wyvern-cast-1", 19386)
+assert(namespace.Alerts.frames.scatter.showCount == 1)
+assert(namespace.Alerts.frames.scatter:IsShown())
+assert(namespace.Alerts.frames.scatter.alpha == 0.55)
+assert(namespace.Alerts.reactionFlashRuntimeModule == "wyvernSting")
+assert(namespace.WyvernSting.lastCast["Enemy-Hunter-1"] == 1100)
+
+-- The matching CLEU notification is a duplicate even when its destination is
+-- a teammate; destination and subsequent aura state are not trigger criteria.
+cleuPayload = {
+    now, "SPELL_CAST_SUCCESS", false, "Enemy-Hunter-1", "MarksOne", 0, 0,
+    "Arena-Teammate", "Friend", 0, 0, 19386, "Wyvern Sting", 1,
+}
+Fire("COMBAT_LOG_EVENT_UNFILTERED")
+assert(namespace.Alerts.frames.scatter.showCount == 1)
+
+-- CLEU can be the first source, and every learned TBC rank is recognized.
+ResetWyvernSting()
+for _, spellID in ipairs({ 19386, 24132, 24133, 27068 }) do
+    now = now + 0.6
+    assert(namespace.WyvernSting:HandleCombatLogEvent(SpellEvent(
+        "SPELL_CAST_SUCCESS", "Enemy-Hunter-1", "Any-Destination", spellID
+    )))
+end
+assert(namespace.Alerts.frames.scatter.showCount == 4)
+
+-- CLEU-first followed by UNIT remains a single flash.
+ResetWyvernSting()
+now = 1110
+namespace.WyvernSting:HandleCombatLogEvent(SpellEvent(
+    "SPELL_CAST_SUCCESS", "Enemy-Hunter-1", "Arena-Teammate", 27068
+))
+Fire("UNIT_SPELLCAST_SUCCEEDED", "arena3", "Wyvern-cast-2", 27068)
+assert(namespace.Alerts.frames.scatter.showCount == 1)
+namespace.WyvernSting:HandleCombatLogEvent(MissEvent(
+    "SPELL_MISSED", "Enemy-Hunter-1", "Arena-Teammate", "IMMUNE", 27068
+))
+assert(namespace.Alerts.frames.scatter.showCount == 1)
+
+-- Wyvern has independent opacity/duration settings and protected hide timing.
+ResetWyvernSting()
+namespace.db.modules.wyvernSting.opacity = 0.7
+namespace.db.modules.wyvernSting.duration = 1.0
+now = 1115
+Fire("UNIT_SPELLCAST_SUCCEEDED", "arena3", "Wyvern-settings", 24132)
+assert(namespace.Alerts.frames.scatter.alpha == 0.7)
+RunTimersThrough(1116)
+assert(not namespace.Alerts.frames.scatter:IsShown())
+
+-- flashEnabled preserves cast detection while suppressing presentation.
+ResetWyvernSting()
+namespace.db.modules.wyvernSting.flashEnabled = false
+now = 1120
+assert(namespace.WyvernSting:HandleCombatLogEvent(SpellEvent(
+    "SPELL_CAST_SUCCESS", "Enemy-Hunter-1", playerGUID, 24133
+)))
+assert(namespace.WyvernSting.lastCast["Enemy-Hunter-1"] == 1120)
+AssertNoWyvernSting("Wyvern flashEnabled=false must suppress the visual")
+
+-- Unmapped sources, pets, non-Hunters, and unrelated spells never alert.
+ResetWyvernSting()
+Fire("UNIT_SPELLCAST_SUCCEEDED", "arena2", "Rogue-wyvern", 19386)
+Fire("UNIT_SPELLCAST_SUCCEEDED", "arenapet3", "Pet-wyvern", 19386)
+Fire("UNIT_SPELLCAST_SUCCEEDED", "arena3", "Other-hunter-spell", 12345)
+namespace.WyvernSting:HandleCombatLogEvent(SpellEvent(
+    "SPELL_CAST_SUCCESS", "Friendly-Hunter", playerGUID, 27068
+))
+namespace.WyvernSting:HandleCombatLogEvent(SpellEvent(
+    "SPELL_CAST_SUCCESS", "NPC-Hunter", playerGUID, 27068
+))
+AssertNoWyvernSting("only a mapped enemy Hunter using Wyvern Sting may flash")
+
+-- Module/master disable clears dedup state and only its own runtime flash.
+ResetWyvernSting()
+now = 1130
+Fire("UNIT_SPELLCAST_SUCCEEDED", "arena3", "Wyvern-disable", 24132)
+namespace.db.modules.wyvernSting.enabled = false
+namespace.WyvernSting:OnSettingsChanged()
+assert(not next(namespace.WyvernSting.lastCast))
+assert(not namespace.Alerts.frames.scatter:IsShown())
+namespace.db.modules.wyvernSting.enabled = true
+now = 1131
+Fire("UNIT_SPELLCAST_SUCCEEDED", "arena3", "Wyvern-master-disable", 24132)
+namespace.db.general.enabled = false
+namespace.WyvernSting:OnSettingsChanged()
+assert(not next(namespace.WyvernSting.lastCast))
+assert(not namespace.Alerts.frames.scatter:IsShown())
+namespace.db.general.enabled = true
+
+-- Clearing the inactive Wyvern module cannot hide a live Scatter flash that
+-- happens to use the same underlying fullscreen frame.
+ResetScatter()
+ResetWyvernSting()
+now = 1140
+Fire("UNIT_SPELLCAST_SUCCEEDED", "arena3", "Scatter-shared-frame", 19503)
+assert(namespace.Alerts.reactionFlashRuntimeModule == "scatter")
+namespace.WyvernSting:ClearRuntime()
+assert(namespace.Alerts.frames.scatter:IsShown())
+namespace.Scatter:ClearRuntime()
+assert(not namespace.Alerts.frames.scatter:IsShown())
 
 -- Restore the Warrior used by the existing Drinking and Overpower regressions.
 arenaUnits.arena3 = { guid = "Enemy-Warrior-2", className = "Warrior", classFile = "WARRIOR", classID = 1, name = "ArmsTwo" }
@@ -1803,6 +1997,10 @@ ResetScatter()
 Fire("UNIT_SPELLCAST_SUCCEEDED", "arena5", "Cast-before-exit", 19503)
 assert(namespace.Alerts.frames.scatter:IsShown())
 assert(namespace.Scatter.lastScatterCast["Enemy-Hunter-Exit"])
+ResetWyvernSting()
+Fire("UNIT_SPELLCAST_SUCCEEDED", "arena5", "Wyvern-before-exit", 27068)
+assert(namespace.Alerts.frames.scatter:IsShown())
+assert(namespace.WyvernSting.lastCast["Enemy-Hunter-Exit"])
 arenaState = false
 namespace.Arena:UpdateArenaState()
 assert(not namespace.isInArena)
@@ -1810,10 +2008,13 @@ AssertNoOpportunity("arena exit must clean runtime")
 assert(not namespace.Drinking:HasActiveDrinker())
 assert(not namespace.Alerts.frames.drinking:IsShown())
 assert(not next(namespace.Scatter.lastScatterCast))
+assert(not next(namespace.WyvernSting.lastCast))
 assert(not namespace.Alerts.frames.scatter:IsShown())
 assert(namespace.InnerFire.state == nil and not namespace.InnerFire.isPresent)
 assert(namespace.InnerFire.charges == nil and namespace.InnerFire.spellID == nil)
 assert(not namespace.Alerts.frames.innerFire:IsShown())
+assert(not namespace.ExecuteRange.isInDanger and namespace.ExecuteRange.threatLabel == nil)
+assert(not namespace.Alerts.frames.executeRange:IsShown())
 assert(not namespace.Arena:GetOpponentByGUID("Enemy-Warrior-1"))
 assert(not namespace.Arena.eventFrame.events.COMBAT_LOG_EVENT_UNFILTERED)
 assert(not namespace.Arena.eventFrame.events.UNIT_AURA)
@@ -1836,12 +2037,26 @@ namespace.Scatter:HandleCombatLogEvent(SpellEvent(
 ))
 Fire("UNIT_SPELLCAST_SUCCEEDED", "arena5", "Cast-outside", 19503)
 AssertNoScatter("Scatter outside arena must be ignored")
+namespace.Alerts.frames.scatter.showCount = 0
+namespace.WyvernSting:HandleCombatLogEvent(SpellEvent(
+    "SPELL_CAST_SUCCESS", "Enemy-Hunter-Exit", playerGUID, 27068
+))
+Fire("UNIT_SPELLCAST_SUCCEEDED", "arena5", "Wyvern-outside", 27068)
+AssertNoWyvernSting("Wyvern Sting outside arena must be ignored")
+playerHealth = 100
+Fire("UNIT_HEALTH", "player")
+assert(not namespace.Alerts.frames.executeRange:IsShown(), "Execute Range outside arena must be ignored")
+namespace.Alerts:ShowExecuteRangePreview()
+assert(namespace.Alerts.frames.executeRange:IsShown())
 namespace.Alerts:ShowDrinkingPreview()
 assert(namespace.Alerts.frames.drinking:IsShown())
 namespace.Alerts:ShowOverpowerPreview()
 assert(namespace.Alerts.frames.enemyOverpower:IsShown())
 namespace.Alerts:ShowScatterPreview()
 assert(namespace.Alerts.frames.scatter:IsShown())
+namespace.Alerts:ShowWyvernStingPreview()
+assert(namespace.Alerts.frames.scatter:IsShown())
+assert(not next(namespace.WyvernSting.lastCast))
 SetAura("player", "Inner Fire", 25431, 2)
 Fire("UNIT_AURA", "player")
 assert(namespace.InnerFire.state == nil)

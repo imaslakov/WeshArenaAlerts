@@ -7,9 +7,11 @@ local NAV_ITEMS = {
     { key = "general", label = "General" },
     { key = "drinking", label = "Drinking" },
     { key = "scatter", label = "Scatter" },
+    { key = "wyvernSting", label = "Wyvern Sting" },
     { key = "innerFire", label = "Inner Fire" },
     { key = "classIcon", label = "Class / Pet Icons" },
     { key = "shieldAbsorb", label = "Shield Absorb" },
+    { key = "executeRange", label = "Execute Range" },
     { key = "enemyOverpower", label = "Enemy Overpower" },
 }
 
@@ -94,9 +96,11 @@ function Options:CreatePanel()
     self:BuildGeneralPage()
     self:BuildDrinkingPage()
     self:BuildScatterPage()
+    self:BuildWyvernStingPage()
     self:BuildInnerFirePage()
     self:BuildClassIconPage()
     self:BuildShieldPage()
+    self:BuildExecuteRangePage()
     self:BuildOverpowerPage()
     self:SelectPage("general")
 
@@ -257,19 +261,31 @@ function Options:BuildGeneralPage()
         if WAA.EnemyOverpower then
             WAA.EnemyOverpower:OnSettingsChanged()
         end
+        if WAA.ExecuteRange then
+            WAA.ExecuteRange:OnSettingsChanged()
+        end
         if WAA.Scatter then
             WAA.Scatter:OnSettingsChanged()
+        end
+        if WAA.WyvernSting then
+            WAA.WyvernSting:OnSettingsChanged()
         end
         if WAA.ClassIcon then
             WAA.ClassIcon:OnSettingsChanged()
         end
     end, -92)
 
+    self.debugChatCheckbox = self:CreateCheckbox(page, "Show debug messages in chat", function()
+        return WAA.db.general.showDebugMessages
+    end, function(value)
+        WAA.db.general.showDebugMessages = value
+    end, -128)
+
     local heading = CreateLabel(page, "Positioning / Preview", "GameFontNormal")
-    heading:SetPoint("TOPLEFT", 24, -150)
+    heading:SetPoint("TOPLEFT", 24, -174)
     heading:SetTextColor(1, 0.82, 0.25)
 
-    local help = CreateLabel(page, "Unlock shows the four positionable alerts. They remain movable after Settings is closed; drag each frame independently, then lock to save a clean screen.", "GameFontHighlightSmall")
+    local help = CreateLabel(page, "Unlock shows the five positionable alerts. They remain movable after Settings is closed; drag each frame independently, then lock to save a clean screen.", "GameFontHighlightSmall")
     help:SetPoint("TOPLEFT", heading, "BOTTOMLEFT", 0, -7)
     help:SetPoint("RIGHT", page, "RIGHT", -24, 0)
     help:SetWordWrap(true)
@@ -277,23 +293,23 @@ function Options:BuildGeneralPage()
 
     self:CreateButton(page, "Unlock Frames", function()
         WAA.Alerts:UnlockFrames()
-    end, 24, -213, 150)
+    end, 24, -237, 150)
     self:CreateButton(page, "Lock Frames", function()
         WAA.Alerts:LockFrames()
-    end, 184, -213, 150)
+    end, 184, -237, 150)
     self:CreateButton(page, "Reset Positions", function()
         WAA:ResetPositions()
         if WAA.isUnlocked then
             WAA.Alerts:UnlockFrames()
         end
-    end, 344, -213, 150)
+    end, 344, -237, 150)
 
     self:CreateButton(page, "Test All Alerts", function()
         WAA.Alerts:TestAll()
-    end, 24, -269, 190)
+    end, 24, -293, 190)
 
     local status = CreateLabel(page, "", "GameFontHighlightSmall")
-    status:SetPoint("TOPLEFT", 24, -322)
+    status:SetPoint("TOPLEFT", 24, -346)
     table.insert(self.refreshers, function()
         if WAA.isInArena then
             status:SetText("Arena runtime: ACTIVE")
@@ -475,6 +491,25 @@ function Options:BuildShieldPage()
     self:CreateTestArea(page, function() WAA.Alerts:ShowShieldPreview() end, -453)
 end
 
+function Options:BuildExecuteRangePage()
+    local page = self:CreatePage(
+        "executeRange",
+        "Execute Range",
+        "Persistent warning for your own low health, but only when the enemy arena team contains a Warrior or Paladin. Warrior Execute requires below 20%; Paladin Hammer of Wrath works at 20% or below."
+    )
+    local db = function() return WAA.db.modules.executeRange end
+    self:CreateCheckbox(page, "Enabled", function() return db().enabled end, function(v)
+        db().enabled = v
+        WAA.ExecuteRange:OnSettingsChanged()
+    end, -92)
+    self:CreateSlider(page, "Text size", 24, 72, 1, 0, function() return db().textSize end, function(v)
+        db().textSize = v
+        WAA.ExecuteRange:OnSettingsChanged()
+        self:RefreshPositioningPreview("executeRange")
+    end, -148)
+    self:CreateTestArea(page, function() WAA.Alerts:ShowExecuteRangePreview() end, -235)
+end
+
 function Options:BuildOverpowerPage()
     local page = self:CreatePage(
         "enemyOverpower",
@@ -510,6 +545,8 @@ function Options:RefreshPositioningPreview(key)
         WAA.Alerts:ShowShieldPreview(true)
     elseif key == "enemyOverpower" then
         WAA.Alerts:ShowOverpowerPreview(true, true)
+    elseif key == "executeRange" then
+        WAA.Alerts:ShowExecuteRangePreview(true)
     end
 end
 
@@ -561,32 +598,27 @@ end
 
 function Options:RegisterSlashCommand()
     SLASH_WESHARENAALERTS1 = "/waa"
-    SlashCmdList.WESHARENAALERTS = function(message)
-        local command = string.lower((message or ""):match("^%s*(.-)%s*$"))
-        if command == "debug" then
-            WAA.debugEnabled = not WAA.debugEnabled
-            WAA.db.general.debug = WAA.debugEnabled
-            print("WeshArenaAlerts debug: " .. (WAA.debugEnabled and "ON" or "OFF"))
-            return
-        elseif command == "log start" then
-            WAA:StartDebugLog()
-            WAA:Print("Debug log recording started; reproduce the issue, then use /waa log stop.")
-            return
-        elseif command == "log stop" then
-            WAA:StopDebugLog()
-            WAA:Print("Debug log stopped with " .. tostring(WAA:GetDebugLogEntryCount()) .. " entries. Use /reload before copying the SavedVariables file.")
-            return
-        elseif command == "log clear" then
-            WAA:ClearDebugLog()
-            WAA:Print("Debug log cleared.")
-            return
-        elseif command == "log status" or command == "log" then
-            WAA:Print(
-                "Debug log: " .. (WAA:IsDebugLogEnabled() and "RECORDING" or "stopped")
-                    .. ", entries=" .. tostring(WAA:GetDebugLogEntryCount())
-            )
-            return
-        end
+    SlashCmdList.WESHARENAALERTS = function()
         self:Open()
     end
+end
+
+function Options:BuildWyvernStingPage()
+    local page = self:CreatePage(
+        "wyvernSting",
+        "Wyvern Sting",
+        "Instant red fullscreen reaction flash when a mapped enemy Hunter uses any TBC rank of Wyvern Sting."
+    )
+    local db = function() return WAA.db.modules.wyvernSting end
+    self:CreateCheckbox(page, "Enabled", function() return db().enabled end, function(v)
+        db().enabled = v
+        WAA.WyvernSting:OnSettingsChanged()
+    end, -92)
+    self:CreateCheckbox(page, "Flash enabled", function() return db().flashEnabled end, function(v)
+        db().flashEnabled = v
+        WAA.WyvernSting:OnSettingsChanged()
+    end, -128)
+    self:CreateSlider(page, "Flash opacity", 0.1, 1, 0.05, 2, function() return db().opacity end, function(v) db().opacity = v end, -184)
+    self:CreateSlider(page, "Flash duration (seconds)", 0.1, 3, 0.1, 1, function() return db().duration end, function(v) db().duration = v end, -257)
+    self:CreateTestArea(page, function() WAA.Alerts:ShowWyvernStingPreview() end, -344)
 end
